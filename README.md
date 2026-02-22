@@ -10,14 +10,21 @@ A self-hosted webhook receiver, dashboard, and push notification relay. Replace 
 - **Auto-channel creation** — POST to any slug and the channel is created automatically
 - **Real-time web dashboard** — monitor, search, filter, and inspect all webhooks
 - **Right-click context menu** — right-click any webhook or channel to delete it instantly
-- **Settings page** — configure branding, typography, and view notification backend status from the UI
+- **Settings page** — configure branding, typography, cleanup, and view notification backend status from the UI
 - **Multiple notification backends** — Pushover, Discord, and SMTP email, all running in parallel
+- **Rich notification content** — enrichment fields (player, user, IP, timestamp, image) forwarded to all backends
+- **Inline images** — images render as thumbnails in the feed and full-size in the detail modal; forwarded to Pushover (attachment), Discord (embed image), and HTML email
+- **Newline rendering** — `\n` in messages renders as line breaks in the dashboard
+- **Push suppression** — add `"push": false` to any payload to skip Pushover for that webhook
 - **Built-in parsers** — Tautulli parser included, generic parser handles everything else
 - **Priority levels** — low / normal / high / critical with visual indicators
 - **Search & filter** — by channel, priority, and free-text search
+- **Automatic cleanup** — configurable background task to delete webhooks older than N days
+- **Expanded font picker** — 20 fonts in 4 categories with live preview
+- **Mobile-responsive** — bottom-sheet modals, horizontal sidebar, stacked controls on small screens
 - **Dual-port design** — dashboard on 8080 (proxy-protected), ingest on 8181 (publicly reachable)
 - **API key authentication** — all webhook POSTs require a pre-shared key
-- **Docker-ready** — `docker compose up -d` to deploy
+- **Docker-ready** — `docker compose up --build -d` to deploy
 
 ## Port Layout
 
@@ -43,8 +50,10 @@ The ingest port only accepts `POST /webhook/{slug}` requests. All dashboard and 
 Open `docker-compose.yml` and fill in your Pushover credentials. The `WEBHOOKHUB_API_KEY` is pre-generated — keep it or replace it with your own value.
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 ```
+
+> **Important:** Because the application code is baked into the Docker image at build time, you must use `--build` every time you deploy code changes. `docker compose restart` alone will not apply updates.
 
 - Dashboard: `http://your-server:8080`
 - Webhook ingest: `http://your-server:8181/webhook/{channel_slug}`
@@ -98,19 +107,52 @@ POST /webhook/{channel_slug}
 
 Available on both port `8080` and port `8181`. All requests require the API key.
 
-### Accepted fields (JSON body)
+### Standard fields (JSON body)
 
 | Field     | Type   | Description                                    |
 |-----------|--------|------------------------------------------------|
 | title     | string | Notification title                             |
-| message   | string | Notification body                              |
+| message   | string | Notification body — `\n` renders as line breaks in the dashboard |
 | priority  | string | `low`, `normal`, `high`, or `critical`         |
+| push      | bool   | Set to `false` to suppress Pushover for this webhook only |
 
 The parser also checks for common alternative field names: `subject`, `body`, `text`, `description`, `content`, `event`, `name`.
 
+### Enrichment fields (optional)
+
+These fields are stored alongside the webhook, displayed in the card footer and detail modal, and forwarded to all notification backends.
+
+| Field           | Type   | Aliases accepted           | Description                          |
+|-----------------|--------|----------------------------|--------------------------------------|
+| player          | string | `player`                   | Player or entity name                |
+| user            | string | `user`, `username`, `user_name` | User account name               |
+| ipaddress       | string | `ipaddress`, `ip_address`, `ip`, `source_ip` | Source IP address   |
+| timestamp       | string | `timestamp`, `event_timestamp`, `time`, `date` | Event timestamp    |
+| image           | string | `image`, `image_url`, `imageurl`, `thumbnail` | URL of an image to display |
+
+**Dashboard:** Images appear as 100px thumbnails on the card and at full resolution in the detail modal.
+
+**Pushover:** The image is attached as an inline photo (`attachment_url`).
+
+**Discord:** Enrichment fields appear as inline embed fields; the image is displayed as the embed's full-width image.
+
+**Email:** Enrichment fields appear in a formatted table; the image is embedded inline in the HTML body.
+
 ### Query parameter overrides
 
-Append `?title=...&message=...&priority=...` to override parsed values. Useful for simple shell scripts that can't set a JSON body.
+Append `?title=...&message=...&priority=...&push=false` to override parsed values. All enrichment fields also accept query parameters using their primary name (`?player=...&image=...` etc.). Useful for simple shell scripts that cannot set a JSON body.
+
+### Push suppression
+
+Add `"push": false` to the JSON payload (or `?push=false` as a query parameter) to skip Pushover for that specific webhook. Discord and email notifications are unaffected. If the field is omitted, Pushover sends as normal.
+
+```bash
+# Store webhook and send Discord/email — skip Pushover
+curl -X POST http://your-server:8181/webhook/verbose-logs \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your_api_key" \
+  -d '{"title": "Log dump", "message": "...", "push": false}'
+```
 
 ### API Key authentication
 
@@ -124,7 +166,7 @@ All webhook POSTs are protected by `WEBHOOKHUB_API_KEY`. Include it with every r
 ?token=your_api_key
 ```
 
-The key is set in `docker-compose.yml` under `WEBHOOKHUB_API_KEY`. To rotate the key, update the value and run `docker compose up -d`.
+The key is set in `docker-compose.yml` under `WEBHOOKHUB_API_KEY`. To rotate the key, update the value and run `docker compose up --build -d`.
 
 ## Dashboard
 
@@ -133,13 +175,14 @@ Open `http://your-server:8080` (or your proxy URL) to access the dashboard.
 - **Left sidebar** — channel list; click to filter the feed
 - **Right-click any webhook card** — context menu with a Delete option
 - **Right-click any channel card** — context menu with a Delete option (also deletes all webhooks in that channel)
-- **Click a webhook card** — opens the detail modal with raw payload and headers
+- **Click a webhook card** — opens the detail modal with all fields, raw payload, and headers
 - **Filter tabs** — filter by priority (All / Critical / High / Normal / Low)
 - **Search bar** — full-text search across title and message (`/` to focus)
 - **Send Test button** — sends a test notification to all configured backends
 - **⚙ Settings button** — opens the settings panel
 - **Auto-refresh** — feed refreshes every 10 seconds without flickering
 - **Footer** — displays the app name and version; updates with your Header Text setting
+- **Mobile layout** — sidebar scrolls horizontally, modals open as bottom sheets, controls stack vertically on narrow screens
 
 ## Settings
 
@@ -157,11 +200,21 @@ Click **⚙ Settings** in the top-right corner. Changes are saved to the databas
 
 | Setting | Options |
 |---------|---------|
-| Font Family | DM Sans (default), Inter, Roboto, Nunito, JetBrains Mono, System UI |
+| Font Family | 20 fonts across 4 groups: Sans-serif (DM Sans, Inter, Roboto, Nunito, Lato, Poppins, Montserrat, Raleway, Oswald, Ubuntu), Serif (Georgia, Times New Roman), Monospace (JetBrains Mono, Fira Code), Fun/Decorative (Comic Sans MS, Pacifico, Permanent Marker, Press Start 2P, Bangers, System UI) — live preview on change |
 | Font Size | Small (12px), Compact (13px), Normal (14px), Large (15px), Extra Large (16px) |
 | Accent Color | Color picker — affects buttons, links, active states, and stat highlights |
 | Primary Text | Color picker — main content text |
 | Secondary Text | Color picker — metadata and subdued text |
+
+### Automatic Cleanup
+
+| Setting | Description |
+|---------|-------------|
+| Enable automatic cleanup | Toggle the background cleanup task on or off |
+| Delete webhooks older than | Number of days — webhooks older than this are deleted automatically |
+| Last cleanup run | Read-only timestamp of the most recent cleanup run |
+
+The cleanup task runs once per hour and removes all webhooks older than the configured threshold. Run **Cleanup Now** to trigger it immediately. All cleanup settings persist in the database.
 
 ### Notification Status
 
@@ -171,11 +224,13 @@ The **Reset Defaults** button restores all settings to their original values.
 
 ## Notification Backends
 
-Each incoming webhook triggers all configured backends simultaneously. Backends are enabled by setting their environment variables in `docker-compose.yml` and running `docker compose up -d`.
+Each incoming webhook triggers all configured backends simultaneously. Backends are enabled by setting their environment variables in `docker-compose.yml` and running `docker compose up --build -d`.
 
 ### Pushover
 
 Required: `PUSHOVER_USER_KEY` and `PUSHOVER_API_TOKEN`. Per-channel settings (priority, sound, enable/disable) are configured from the channel list in the dashboard.
+
+If the webhook payload includes an `image` URL, it is sent to Pushover as an inline photo attachment. If `"push": false` is set in the payload, Pushover is skipped entirely for that webhook.
 
 ### Discord
 
@@ -187,6 +242,8 @@ Set `DISCORD_WEBHOOK_URL` to a Discord channel webhook URL. Each notification is
 | normal   | Blue        |
 | high     | Amber       |
 | critical | Red         |
+
+Enrichment fields (player, user, IP, timestamp) appear as inline embed fields. If an image URL is provided it is displayed as the embed's full-width image.
 
 ```yaml
 - DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your/webhook
@@ -204,6 +261,8 @@ Set all six SMTP variables. Port `465` uses implicit SSL; all other ports use ST
 - SMTP_FROM=you@gmail.com
 - SMTP_TO=you@gmail.com,other@gmail.com
 ```
+
+Emails are sent as `multipart/alternative` with both plain text and HTML parts. The HTML part includes a formatted enrichment field table and, if an image URL is provided, an inline image.
 
 For Gmail, generate an [App Password](https://myaccount.google.com/apppasswords) rather than using your account password.
 
@@ -230,7 +289,7 @@ HOSTNAME=$(hostname)
 curl -sS -X POST "$WEBHOOK_URL" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_api_key" \
-  -d "{\"title\":\"SSH Login: $HOSTNAME\",\"message\":\"$USER_INFO logged in at $(date)\",\"priority\":\"high\"}" &
+  -d "{\"title\":\"SSH Login: $HOSTNAME\",\"message\":\"$USER_INFO logged in at $(date)\",\"priority\":\"high\",\"user\":\"$USER\",\"ipaddress\":\"${SSH_CONNECTION%% *}\"}" &
 ```
 
 ### apt/dnf Update Notifications
@@ -262,6 +321,22 @@ curl -sS -X POST http://your-server:8181/webhook/backups \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_api_key" \
   -d "{\"title\":\"$TITLE\",\"message\":\"$(echo $RESULT | head -c 500)\",\"priority\":\"$PRIORITY\"}"
+```
+
+### Game server event (with enrichment fields)
+
+```bash
+curl -X POST http://your-server:8181/webhook/gameserver \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your_api_key" \
+  -d '{
+    "title": "Player Joined",
+    "message": "Steve connected to the server.",
+    "priority": "low",
+    "player": "Steve",
+    "ipaddress": "203.0.113.42",
+    "timestamp": "2025-01-15T14:32:00Z"
+  }'
 ```
 
 ### CheckMK (notification script)
@@ -296,21 +371,21 @@ curl -sS -X POST "$WEBHOOK_URL" \
 All management endpoints are on port `8080` only. The ingest endpoint is available on both ports.
 
 | Method | Endpoint                       | Port        | Description                        |
-|--------|--------------------------------|-------------|------------------------------------|
-| POST   | `/webhook/{slug}`              | 8080 + 8181 | Receive a webhook                  |
-| GET    | `/api/channels`                | 8080        | List all channels                  |
-| POST   | `/api/channels`                | 8080        | Create a channel                   |
-| PUT    | `/api/channels/{slug}`         | 8080        | Update a channel                   |
-| DELETE | `/api/channels/{slug}`         | 8080        | Delete channel + its webhooks      |
-| GET    | `/api/webhooks`                | 8080        | List webhooks (with filters)       |
-| GET    | `/api/webhooks/{id}`           | 8080        | Get webhook detail                 |
-| DELETE | `/api/webhooks/{id}`           | 8080        | Delete a webhook                   |
-| DELETE | `/api/webhooks`                | 8080        | Bulk delete (by channel/age)       |
-| GET    | `/api/stats`                   | 8080        | Dashboard statistics               |
-| GET    | `/api/settings`                | 8080        | Get current settings               |
-| POST   | `/api/settings`                | 8080        | Update settings                    |
-| GET    | `/api/notification-status`     | 8080        | Check which backends are configured|
-| POST   | `/api/test`                    | 8080        | Send a test notification           |
+|--------|--------------------------------|-------------|-------------------------------------|
+| POST   | `/webhook/{slug}`              | 8080 + 8181 | Receive a webhook                   |
+| GET    | `/api/channels`                | 8080        | List all channels                   |
+| POST   | `/api/channels`                | 8080        | Create a channel                    |
+| PUT    | `/api/channels/{slug}`         | 8080        | Update a channel                    |
+| DELETE | `/api/channels/{slug}`         | 8080        | Delete channel + its webhooks       |
+| GET    | `/api/webhooks`                | 8080        | List webhooks (with filters)        |
+| GET    | `/api/webhooks/{id}`           | 8080        | Get webhook detail                  |
+| DELETE | `/api/webhooks/{id}`           | 8080        | Delete a webhook                    |
+| DELETE | `/api/webhooks`                | 8080        | Bulk delete (by channel/age)        |
+| GET    | `/api/stats`                   | 8080        | Dashboard statistics                |
+| GET    | `/api/settings`                | 8080        | Get current settings                |
+| POST   | `/api/settings`                | 8080        | Update settings                     |
+| GET    | `/api/notification-status`     | 8080        | Check which backends are configured |
+| POST   | `/api/test`                    | 8080        | Send a test notification            |
 
 ### Query parameters for GET /api/webhooks
 
@@ -362,7 +437,7 @@ PARSERS["uptime-kuma"] = parse_uptime_kuma
 The parser receives the decoded JSON body and must return a dict with `title`, `message`, and `priority` keys. Rebuild the container after any code changes:
 
 ```bash
-docker compose up -d --build
+docker compose up --build -d
 ```
 
 ## License
