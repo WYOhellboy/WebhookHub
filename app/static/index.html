@@ -480,9 +480,11 @@
     padding: 16px 20px;
     cursor: pointer;
     transition: all 0.15s;
-    animation: slideIn 0.2s ease;
     position: relative;
   }
+
+  /* Only newly-arrived cards get the slide-in animation */
+  .webhook-card-new { animation: slideIn 0.2s ease; }
 
   .webhook-card:hover {
     border-color: rgba(59, 130, 246, 0.3);
@@ -1215,6 +1217,18 @@
         <div class="notif-hint">Configure via environment variables in docker-compose.yml</div>
       </div>
 
+      <!-- Dashboard -->
+      <div class="settings-section">
+        <div class="settings-section-title">Dashboard</div>
+        <div class="form-group">
+          <label class="form-label">Auto-refresh interval</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="number" class="form-input" id="s_refresh_interval" min="5" max="3600" style="width:100px">
+            <span style="color:var(--text-secondary);font-size:13px">seconds (min 5)</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Cleanup -->
       <div class="settings-section">
         <div class="settings-section-title">Automatic Cleanup</div>
@@ -1265,20 +1279,25 @@ const DEFAULT_SETTINGS = {
   color_text_secondary: '#8896b0',
   cleanup_enabled:      '0',
   cleanup_days:         '30',
+  refresh_interval:     '10',
 };
 
 let state = {
-  channels:        [],
-  webhooks:        [],
-  activeChannel:   '',
-  activePriority:  '',
-  searchQuery:     '',
-  offset:          0,
-  limit:           50,
-  total:           0,
-  settings:        { ...DEFAULT_SETTINGS },
-  refreshInterval: null,
+  channels:       [],
+  webhooks:       [],
+  activeChannel:  '',
+  activePriority: '',
+  searchQuery:    '',
+  offset:         0,
+  limit:          50,
+  total:          0,
+  settings:       { ...DEFAULT_SETTINGS },
 };
+
+// Refresh-cycle timers (module-level so loadAll can cancel and restart them)
+let _refreshTimeout = null;
+let _countdownTimer = null;
+let _countdownVal   = 0;
 
 const BASE = window.location.origin;
 
@@ -1307,6 +1326,7 @@ function buildWebhookParams() {
 
 async function loadAll() {
   document.getElementById('refreshSpinner').classList.add('active');
+  document.getElementById('refreshText').textContent = '…';
   try {
     const [stats, channels, data] = await Promise.all([
       api('/api/stats'),
@@ -1330,6 +1350,7 @@ async function loadAll() {
     document.getElementById('allCount').textContent   = `${stats.total_webhooks} webhooks`;
   } finally {
     document.getElementById('refreshSpinner').classList.remove('active');
+    startRefreshCycle();   // restart countdown after every fetch (success or error)
   }
 }
 
@@ -1365,53 +1386,88 @@ function renderChannels() {
   `).join('');
 }
 
+function buildCardInner(w) {
+  const ch     = state.channels.find(c => c.slug === w.channel_slug) || {};
+  const tagBg  = ch.color ? ch.color + '22' : 'var(--accent-glow)';
+  const tagClr = ch.color || 'var(--accent)';
+  return `
+    <div class="webhook-card-priority priority-${w.priority}"></div>
+    <div class="webhook-top">
+      <div class="webhook-title">${esc(w.title || 'Untitled')}</div>
+      <div class="webhook-meta">
+        <span class="webhook-channel-tag" style="background:${tagBg};color:${tagClr}">${ch.icon || '📡'} ${esc(w.channel_slug)}</span>
+        <span class="webhook-time">${timeAgo(w.received_at)}</span>
+      </div>
+    </div>
+    <div class="webhook-message">${nl2br(w.message)}</div>
+    ${w.image_url && (w.image_url.startsWith('http://') || w.image_url.startsWith('https://') || w.image_url.startsWith('/'))
+      ? `<img src="${esc(w.image_url)}" class="card-image-preview" alt="" onerror="this.style.display='none'">`
+      : ''}
+    <div class="webhook-footer">
+      ${w.pushover_sent
+        ? '<span class="pushover-badge">✓ Pushover sent</span>'
+        : '<span class="pushover-badge failed">○ No push</span>'}
+      ${w.player          ? `<span class="meta-tag" title="Player">🎮 ${esc(w.player)}</span>`               : ''}
+      ${w.user_name       ? `<span class="meta-tag" title="User">👤 ${esc(w.user_name)}</span>`             : ''}
+      ${w.ip_address      ? `<span class="meta-tag" title="IP Address">${esc(w.ip_address)}</span>`         : ''}
+      ${w.event_timestamp ? `<span class="meta-tag" title="Event Time">🕐 ${esc(w.event_timestamp)}</span>` : ''}
+    </div>
+  `;
+}
+
 function renderWebhooks() {
   const list = document.getElementById('webhookList');
 
   if (state.webhooks.length === 0) {
-    const slug = state.activeChannel || '{channel}';
     list.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">📭</div>
         <div class="empty-text">No webhooks yet</div>
-        <div class="empty-sub">curl -X POST ${BASE}/webhook/${slug} \\<br>  -H "Content-Type: application/json" \\<br>  -d '{"title":"Hello","message":"First webhook!"}'</div>
+        <div class="empty-sub">curl -X POST ${BASE}/webhook/${state.activeChannel || '{channel}'} \\<br>  -H "Content-Type: application/json" \\<br>  -d '{"title":"Hello","message":"First webhook!"}'</div>
       </div>
     `;
     return;
   }
 
-  list.innerHTML = state.webhooks.map(w => {
-    const ch     = state.channels.find(c => c.slug === w.channel_slug) || {};
-    const tagBg  = ch.color ? ch.color + '22' : 'var(--accent-glow)';
-    const tagClr = ch.color || 'var(--accent)';
-    return `
-      <div class="webhook-card"
-           onclick="showDetail(${w.id})"
-           oncontextmenu="showContextMenu(event,'webhook',${w.id})">
-        <div class="webhook-card-priority priority-${w.priority}"></div>
-        <div class="webhook-top">
-          <div class="webhook-title">${esc(w.title || 'Untitled')}</div>
-          <div class="webhook-meta">
-            <span class="webhook-channel-tag" style="background:${tagBg};color:${tagClr}">${ch.icon || '📡'} ${esc(w.channel_slug)}</span>
-            <span class="webhook-time">${timeAgo(w.received_at)}</span>
-          </div>
-        </div>
-        <div class="webhook-message">${nl2br(w.message)}</div>
-        ${w.image_url && (w.image_url.startsWith('http://') || w.image_url.startsWith('https://') || w.image_url.startsWith('/'))
-          ? `<img src="${esc(w.image_url)}" class="card-image-preview" alt="" onerror="this.style.display='none'">`
-          : ''}
-        <div class="webhook-footer">
-          ${w.pushover_sent
-            ? '<span class="pushover-badge">✓ Pushover sent</span>'
-            : '<span class="pushover-badge failed">○ No push</span>'}
-          ${w.player         ? `<span class="meta-tag" title="Player">🎮 ${esc(w.player)}</span>`              : ''}
-          ${w.user_name      ? `<span class="meta-tag" title="User">👤 ${esc(w.user_name)}</span>`            : ''}
-          ${w.ip_address     ? `<span class="meta-tag" title="IP Address">${esc(w.ip_address)}</span>`        : ''}
-          ${w.event_timestamp? `<span class="meta-tag" title="Event Time">🕐 ${esc(w.event_timestamp)}</span>`: ''}
-        </div>
-      </div>
-    `;
-  }).join('');
+  // Clear any empty-state placeholder
+  const emptyEl = list.querySelector('.empty-state');
+  if (emptyEl) emptyEl.remove();
+
+  // IDs coming in this render
+  const newIds = new Set(state.webhooks.map(w => w.id));
+
+  // Remove cards that are no longer in the result set
+  list.querySelectorAll('.webhook-card[data-id]').forEach(el => {
+    if (!newIds.has(parseInt(el.dataset.id, 10))) el.remove();
+  });
+
+  // Index surviving card elements by id
+  const existingEls = new Map();
+  list.querySelectorAll('.webhook-card[data-id]').forEach(el => {
+    existingEls.set(parseInt(el.dataset.id, 10), el);
+  });
+
+  // Build a DocumentFragment in the correct order.
+  // appendChild() on an already-attached element moves it (no clone needed).
+  const fragment = document.createDocumentFragment();
+  for (const w of state.webhooks) {
+    let el = existingEls.get(w.id);
+    if (!el) {
+      // Brand-new card — create it and let the CSS animation fire once
+      el = document.createElement('div');
+      el.className = 'webhook-card webhook-card-new';
+      el.dataset.id = w.id;
+      el.onclick = () => showDetail(w.id);
+      el.oncontextmenu = e => showContextMenu(e, 'webhook', w.id);
+      el.innerHTML = buildCardInner(w);
+    } else {
+      // Existing card — only touch the timestamp so the rest of the DOM is stable
+      const timeEl = el.querySelector('.webhook-time');
+      if (timeEl) timeEl.textContent = timeAgo(w.received_at);
+    }
+    fragment.appendChild(el);   // moves element into fragment (vacates list temporarily)
+  }
+  list.appendChild(fragment);   // atomically restores everything in correct order
 }
 
 function renderPagination() {
@@ -1426,6 +1482,34 @@ function renderPagination() {
   html += `<span>Page ${current} of ${pages} (${state.total} total)</span>`;
   if (current < pages) html += `<button class="btn btn-sm" onclick="goPage(${current + 1})">Next →</button>`;
   pag.innerHTML = html;
+}
+
+// ── Refresh cycle ─────────────────────────────────────────────────────────────
+
+function updateCountdownDisplay() {
+  const el = document.getElementById('refreshText');
+  if (!el) return;
+  const v = _countdownVal;
+  if (v <= 0)      el.textContent = '…';
+  else if (v < 60) el.textContent = `${v}s`;
+  else {
+    const m = Math.floor(v / 60), s = v % 60;
+    el.textContent = s ? `${m}m ${s}s` : `${m}m`;
+  }
+}
+
+function startRefreshCycle() {
+  clearTimeout(_refreshTimeout);
+  clearInterval(_countdownTimer);
+  const delaySec = Math.max(5, parseInt(state.settings.refresh_interval || '10', 10));
+  _countdownVal = delaySec;
+  updateCountdownDisplay();
+  _countdownTimer = setInterval(() => {
+    _countdownVal--;
+    updateCountdownDisplay();
+    if (_countdownVal <= 0) clearInterval(_countdownTimer);
+  }, 1000);
+  _refreshTimeout = setTimeout(() => loadAll(), delaySec * 1000);
 }
 
 // ── Navigation actions ────────────────────────────────────────────────────────
@@ -1637,6 +1721,9 @@ function applySettings(s) {
   document.getElementById('faviconEl').href = s.favicon_url;
 
   state.settings = { ...s };
+
+  // Restart the countdown with the (possibly updated) interval
+  startRefreshCycle();
 }
 
 async function loadSettings() {
@@ -1658,6 +1745,9 @@ function showSettingsModal() {
   document.getElementById('s_color_accent').value        = s.color_accent;
   document.getElementById('s_color_text_primary').value  = s.color_text_primary;
   document.getElementById('s_color_text_secondary').value = s.color_text_secondary;
+
+  // Dashboard
+  document.getElementById('s_refresh_interval').value = s.refresh_interval || '10';
 
   // Cleanup
   document.getElementById('s_cleanup_enabled').checked = s.cleanup_enabled === '1';
@@ -1705,6 +1795,7 @@ async function saveSettings() {
     color_text_secondary: document.getElementById('s_color_text_secondary').value,
     cleanup_enabled:      document.getElementById('s_cleanup_enabled').checked ? '1' : '0',
     cleanup_days:         (cleanupDays > 0 ? cleanupDays : 30).toString(),
+    refresh_interval:     String(Math.max(5, parseInt(document.getElementById('s_refresh_interval').value, 10) || 10)),
   };
 
   try {
@@ -1842,9 +1933,8 @@ document.addEventListener('keydown', (e) => {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
-  await loadSettings();             // Apply persisted settings before first render
-  await loadAll();
-  state.refreshInterval = setInterval(loadAll, 10000);
+  await loadSettings();  // Apply persisted settings before first render
+  await loadAll();       // startRefreshCycle() is called inside loadAll's finally block
 }
 
 init();
