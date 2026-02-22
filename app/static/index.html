@@ -470,10 +470,8 @@
     font-size: 13px;
     color: var(--text-secondary);
     line-height: 1.5;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   .webhook-footer {
@@ -492,6 +490,37 @@
     gap: 4px;
   }
   .pushover-badge.failed { color: var(--red); }
+
+  .meta-tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+  }
+
+  .detail-image {
+    margin-top: 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    max-width: 100%;
+    display: block;
+  }
+
+  .card-image-preview {
+    max-width: 100px;
+    height: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    margin-top: 10px;
+    display: block;
+  }
 
   /* ── Detail Modal ───────────────────────────────── */
   .modal-overlay {
@@ -1239,11 +1268,18 @@ function renderWebhooks() {
             <span class="webhook-time">${timeAgo(w.received_at)}</span>
           </div>
         </div>
-        <div class="webhook-message">${esc(w.message)}</div>
+        <div class="webhook-message">${nl2br(w.message)}</div>
+        ${w.image_url && (w.image_url.startsWith('http://') || w.image_url.startsWith('https://') || w.image_url.startsWith('/'))
+          ? `<img src="${esc(w.image_url)}" class="card-image-preview" alt="" onerror="this.style.display='none'">`
+          : ''}
         <div class="webhook-footer">
           ${w.pushover_sent
             ? '<span class="pushover-badge">✓ Pushover sent</span>'
             : '<span class="pushover-badge failed">○ No push</span>'}
+          ${w.player         ? `<span class="meta-tag" title="Player">🎮 ${esc(w.player)}</span>`              : ''}
+          ${w.user_name      ? `<span class="meta-tag" title="User">👤 ${esc(w.user_name)}</span>`            : ''}
+          ${w.ip_address     ? `<span class="meta-tag" title="IP Address">${esc(w.ip_address)}</span>`        : ''}
+          ${w.event_timestamp? `<span class="meta-tag" title="Event Time">🕐 ${esc(w.event_timestamp)}</span>`: ''}
         </div>
       </div>
     `;
@@ -1311,6 +1347,9 @@ async function showDetail(id) {
   try { parsedBody = JSON.stringify(JSON.parse(w.raw_body), null, 2); }
   catch { parsedBody = w.raw_body; }
 
+  const safeImageUrl = w.image_url && (w.image_url.startsWith('http://') || w.image_url.startsWith('https://') || w.image_url.startsWith('/'))
+    ? w.image_url : '';
+
   document.getElementById('detailBody').innerHTML = `
     <div class="detail-grid">
       <div class="detail-label">ID</div>       <div class="detail-value">#${w.id}</div>
@@ -1319,8 +1358,14 @@ async function showDetail(id) {
       <div class="detail-label">Source IP</div><div class="detail-value">${esc(w.source_ip)}</div>
       <div class="detail-label">Received</div> <div class="detail-value">${new Date(w.received_at + 'Z').toLocaleString()}</div>
       <div class="detail-label">Pushover</div> <div class="detail-value">${w.pushover_sent ? '✅ Sent' : '❌ Not sent'}</div>
-      <div class="detail-label">Message</div>  <div class="detail-value">${esc(w.message)}</div>
+      <div class="detail-label">Message</div>  <div class="detail-value" style="white-space:pre-wrap">${nl2br(w.message)}</div>
+      ${w.player          ? `<div class="detail-label">Player</div>    <div class="detail-value">${esc(w.player)}</div>` : ''}
+      ${w.user_name       ? `<div class="detail-label">User</div>      <div class="detail-value">${esc(w.user_name)}</div>` : ''}
+      ${w.ip_address      ? `<div class="detail-label">IP Address</div><div class="detail-value">${esc(w.ip_address)}</div>` : ''}
+      ${w.event_timestamp ? `<div class="detail-label">Timestamp</div> <div class="detail-value">${esc(w.event_timestamp)}</div>` : ''}
+      ${w.image_url       ? `<div class="detail-label">Image URL</div> <div class="detail-value" style="word-break:break-all">${esc(w.image_url)}</div>` : ''}
     </div>
+    ${safeImageUrl ? `<img src="${esc(safeImageUrl)}" class="detail-image" alt="Webhook image" onerror="this.style.display='none'">` : ''}
     <div style="margin-top:20px">
       <div class="form-label">Raw Payload</div>
       <pre class="raw-body">${esc(parsedBody)}</pre>
@@ -1583,6 +1628,10 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
+}
+
+function nl2br(s) {
+  return esc(s).replace(/\n/g, '<br>');
 }
 
 function timeAgo(dateStr) {

@@ -4,6 +4,7 @@ WebhookHub - Self-hosted webhook receiver + dashboard with Pushover, Discord, an
 
 import os
 import json
+import html
 import asyncio
 import smtplib
 import httpx
@@ -88,6 +89,11 @@ def init_db():
             parsed_data TEXT DEFAULT '{}',
             received_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             pushover_sent INTEGER DEFAULT 0,
+            player TEXT DEFAULT '',
+            user_name TEXT DEFAULT '',
+            ip_address TEXT DEFAULT '',
+            event_timestamp TEXT DEFAULT '',
+            image_url TEXT DEFAULT '',
             FOREIGN KEY (channel_slug) REFERENCES channels(slug)
         );
 
@@ -100,6 +106,20 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_webhooks_received ON webhooks(received_at DESC);
         CREATE INDEX IF NOT EXISTS idx_webhooks_priority ON webhooks(priority);
     """)
+
+    # Migrate existing databases by adding new columns if absent
+    _new_cols = [
+        ("player",          "TEXT DEFAULT ''"),
+        ("user_name",       "TEXT DEFAULT ''"),
+        ("ip_address",      "TEXT DEFAULT ''"),
+        ("event_timestamp", "TEXT DEFAULT ''"),
+        ("image_url",       "TEXT DEFAULT ''"),
+    ]
+    for col, defn in _new_cols:
+        try:
+            conn.execute(f"ALTER TABLE webhooks ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     # Seed default channels
     defaults = [
@@ -126,20 +146,34 @@ def init_db():
 
 # ── Pushover ──────────────────────────────────────────────────────────────────
 
-async def send_pushover(title: str, message: str, priority: int = 0, sound: str = "pushover", url: str = ""):
+async def send_pushover(title: str, message: str, priority: int = 0, sound: str = "pushover", url: str = "", extra: dict = None):
     if not PUSHOVER_USER_KEY or not PUSHOVER_API_TOKEN:
         return False
+
+    full_message = message
+    if extra:
+        lines = []
+        if extra.get("player"):          lines.append(f"Player: {extra['player']}")
+        if extra.get("user_name"):       lines.append(f"User: {extra['user_name']}")
+        if extra.get("ip_address"):      lines.append(f"IP: {extra['ip_address']}")
+        if extra.get("event_timestamp"): lines.append(f"Time: {extra['event_timestamp']}")
+        if lines:
+            full_message = message + "\n\n" + "\n".join(lines)
 
     payload = {
         "token":    PUSHOVER_API_TOKEN,
         "user":     PUSHOVER_USER_KEY,
         "title":    title[:250],
-        "message":  message[:1024],
+        "message":  full_message[:1024],
         "priority": priority,
         "sound":    sound,
     }
     if url:
         payload["url"] = url
+    elif extra and extra.get("image_url"):
+        payload["url"] = extra["image_url"]
+    if extra and extra.get("image_url") and extra["image_url"].startswith(("http://", "https://")):
+        payload["attachment_url"] = extra["image_url"]
     if priority == 2:
         payload["retry"]  = 60
         payload["expire"] = 3600
@@ -163,18 +197,27 @@ _DISCORD_COLORS = {
 }
 
 
-async def send_discord(title: str, message: str, priority: str = "normal", channel_name: str = ""):
+async def send_discord(title: str, message: str, priority: str = "normal", channel_name: str = "", extra: dict = None):
     if not DISCORD_WEBHOOK_URL:
         return False
 
     embed_title = f"[{channel_name}] {title}" if channel_name else title
-    payload = {
-        "embeds": [{
-            "title":       embed_title[:256],
-            "description": message[:2048],
-            "color":       _DISCORD_COLORS.get(priority, 0x3b82f6),
-        }]
+    embed = {
+        "title":       embed_title[:256],
+        "description": message[:2048],
+        "color":       _DISCORD_COLORS.get(priority, 0x3b82f6),
     }
+    if extra:
+        fields = []
+        if extra.get("player"):          fields.append({"name": "Player",    "value": extra["player"],          "inline": True})
+        if extra.get("user_name"):       fields.append({"name": "User",      "value": extra["user_name"],       "inline": True})
+        if extra.get("ip_address"):      fields.append({"name": "IP Address","value": extra["ip_address"],      "inline": True})
+        if extra.get("event_timestamp"): fields.append({"name": "Timestamp", "value": extra["event_timestamp"], "inline": True})
+        if fields:
+            embed["fields"] = fields
+        if extra.get("image_url"):
+            embed["image"] = {"url": extra["image_url"]}
+    payload = {"embeds": [embed]}
 
     async with httpx.AsyncClient() as client:
         try:
@@ -187,13 +230,15 @@ async def send_discord(title: str, message: str, priority: str = "normal", chann
 
 # ── SMTP ──────────────────────────────────────────────────────────────────────
 
-def _smtp_send_sync(subject: str, body: str):
+def _smtp_send_sync(subject: str, body: str, html_body: str = ""):
     """Blocking SMTP send — run via asyncio.to_thread()."""
-    msg = MIMEMultipart()
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = SMTP_FROM
     msg["To"]      = SMTP_TO
     msg.attach(MIMEText(body, "plain"))
+    if html_body:
+        msg.attach(MIMEText(html_body, "html"))
     recipients = [r.strip() for r in SMTP_TO.split(",")]
 
     if SMTP_PORT == 465:
@@ -208,13 +253,53 @@ def _smtp_send_sync(subject: str, body: str):
             server.sendmail(SMTP_FROM, recipients, msg.as_string())
 
 
-async def send_smtp(title: str, message: str, channel_name: str = ""):
+async def send_smtp(title: str, message: str, channel_name: str = "", extra: dict = None):
     if not all([SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_TO]):
         return False
 
     subject = f"[WebhookHub][{channel_name}] {title}" if channel_name else f"[WebhookHub] {title}"
+
+    # Plain-text body
+    body = message
+    if extra:
+        lines = []
+        if extra.get("player"):          lines.append(f"Player:    {extra['player']}")
+        if extra.get("user_name"):       lines.append(f"User:      {extra['user_name']}")
+        if extra.get("ip_address"):      lines.append(f"IP:        {extra['ip_address']}")
+        if extra.get("event_timestamp"): lines.append(f"Timestamp: {extra['event_timestamp']}")
+        if extra.get("image_url"):       lines.append(f"Image:     {extra['image_url']}")
+        if lines:
+            body = message + "\n\n" + "\n".join(lines)
+
+    # HTML body
+    def he(s): return html.escape(str(s))
+    td_label = 'style="padding:4px 16px 4px 0;color:#888;white-space:nowrap;vertical-align:top;font-size:13px"'
+    td_value = 'style="padding:4px 0;color:#333;font-size:13px"'
+    rows_html = ""
+    img_html  = ""
+    if extra:
+        rows = []
+        if extra.get("player"):          rows.append(f'<tr><td {td_label}>Player</td><td {td_value}>{he(extra["player"])}</td></tr>')
+        if extra.get("user_name"):       rows.append(f'<tr><td {td_label}>User</td><td {td_value}>{he(extra["user_name"])}</td></tr>')
+        if extra.get("ip_address"):      rows.append(f'<tr><td {td_label}>IP Address</td><td {td_value}>{he(extra["ip_address"])}</td></tr>')
+        if extra.get("event_timestamp"): rows.append(f'<tr><td {td_label}>Timestamp</td><td {td_value}>{he(extra["event_timestamp"])}</td></tr>')
+        if rows:
+            rows_html = f'<table style="margin-top:20px;border-collapse:collapse">{"".join(rows)}</table>'
+        if extra.get("image_url"):
+            img_html = f'<img src="{he(extra["image_url"])}" style="max-width:100%;margin-top:16px;border-radius:6px;display:block" alt="Webhook image">'
+
+    html_body = f"""\
+<html><body style="font-family:sans-serif;color:#333;max-width:600px;margin:0 auto;padding:24px">
+<h3 style="margin:0 0 12px;color:#111">{he(title)}</h3>
+<p style="margin:0;line-height:1.6;white-space:pre-wrap">{he(message)}</p>
+{rows_html}
+{img_html}
+<hr style="margin:24px 0;border:none;border-top:1px solid #eee">
+<p style="margin:0;font-size:12px;color:#aaa">Sent by WebhookHub &middot; Channel: {he(channel_name)}</p>
+</body></html>"""
+
     try:
-        await asyncio.to_thread(_smtp_send_sync, subject, message)
+        await asyncio.to_thread(_smtp_send_sync, subject, body, html_body)
         return True
     except Exception as e:
         print(f"[smtp] Error: {e}")
@@ -321,17 +406,36 @@ async def receive_webhook(channel_slug: str, request: Request):
     if request.query_params.get("message"):  parsed["message"]  = request.query_params["message"]
     if request.query_params.get("priority"): parsed["priority"] = request.query_params["priority"]
 
+    # Extract optional enrichment fields from payload
+    d = data if isinstance(data, dict) else {}
+    extra = {
+        "player":          str(d.get("player") or ""),
+        "user_name":       str(d.get("user") or d.get("username") or d.get("user_name") or ""),
+        "ip_address":      str(d.get("ipaddress") or d.get("ip_address") or d.get("ip") or ""),
+        "event_timestamp": str(d.get("timestamp") or d.get("event_timestamp") or ""),
+        "image_url":       str(d.get("image") or d.get("image_url") or d.get("img") or ""),
+    }
+    # Allow query-param overrides for each
+    qp_map = [("player","player"), ("user_name","user"), ("ip_address","ipaddress"),
+               ("event_timestamp","timestamp"), ("image_url","image")]
+    for field, qp in qp_map:
+        if request.query_params.get(qp):
+            extra[field] = request.query_params[qp]
+
     source_ip    = request.client.host if request.client else "unknown"
     headers_dict = dict(request.headers)
 
     db.execute(
         """INSERT INTO webhooks
-           (channel_slug, title, message, priority, source_ip, raw_headers, raw_body, parsed_data)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (channel_slug, title, message, priority, source_ip, raw_headers, raw_body, parsed_data,
+            player, user_name, ip_address, event_timestamp, image_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             channel_slug, parsed["title"], parsed["message"], parsed["priority"],
             source_ip, json.dumps(headers_dict), raw_body_str,
             json.dumps(data) if isinstance(data, dict) else raw_body_str,
+            extra["player"], extra["user_name"], extra["ip_address"],
+            extra["event_timestamp"], extra["image_url"],
         ),
     )
     webhook_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -348,6 +452,7 @@ async def receive_webhook(channel_slug: str, request: Request):
             message=parsed["message"],
             priority=po_priority,
             sound=channel["pushover_sound"],
+            extra=extra,
         )
         db.execute("UPDATE webhooks SET pushover_sent = ? WHERE id = ?",
                    (1 if pushover_sent else 0, webhook_id))
@@ -357,10 +462,12 @@ async def receive_webhook(channel_slug: str, request: Request):
     asyncio.create_task(send_discord(
         title=parsed["title"], message=parsed["message"],
         priority=parsed["priority"], channel_name=channel["name"],
+        extra=extra,
     ))
     asyncio.create_task(send_smtp(
         title=parsed["title"], message=parsed["message"],
         channel_name=channel["name"],
+        extra=extra,
     ))
 
     db.close()
