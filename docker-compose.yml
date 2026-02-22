@@ -1,0 +1,39 @@
+services:
+  webhookhub:
+    build: .
+    container_name: webhookhub
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Dashboard (put behind authenticated HTTPS proxy)
+      - "8181:8181"   # Webhook ingest (publicly reachable for POST payloads)
+    environment:
+      # ── Required: Pushover credentials ──
+      # Get these from https://pushover.net
+      - PUSHOVER_USER_KEY=your_pushover_user_key
+      - PUSHOVER_API_TOKEN=your_pushover_api_token
+
+      # ── API key to protect ingest endpoints ──
+      # Webhooks must include X-API-Key: <key> header or ?token=<key> param
+      # Generate one with: python3 -c "import uuid; print(uuid.uuid4().hex)"
+      - WEBHOOKHUB_API_KEY=your_generated_api_key
+
+      # ── Optional: Discord notifications ──
+      # Paste your Discord webhook URL to enable
+      # - DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+      # ── Optional: SMTP email notifications ──
+      # Port 465 uses SSL; all others use STARTTLS
+      # - SMTP_HOST=smtp.gmail.com
+      # - SMTP_PORT=587
+      # - SMTP_USER=you@gmail.com
+      # - SMTP_PASS=your_app_password
+      # - SMTP_FROM=you@gmail.com
+      # - SMTP_TO=you@gmail.com
+
+      # ── Database location (inside the container) ──
+      - WEBHOOKHUB_DB=/data/webhookhub.db
+    volumes:
+      - webhookhub_data:/data
+
+volumes:
+  webhookhub_data:

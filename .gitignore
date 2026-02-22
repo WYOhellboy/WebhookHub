@@ -1,0 +1,22 @@
+# Claude Code local settings
+.claude/
+
+# Docker / compose overrides with real credentials
+docker-compose.override.yml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Database (contains webhook data)
+*.db
+*.db-wal
+*.db-shm
+
+# OS
+.DS_Store
+Thumbs.db

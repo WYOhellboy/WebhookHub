@@ -1,0 +1,1634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebhookHub</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg" id="faviconEl">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0a0e17;
+    --bg-secondary: #111827;
+    --bg-card: #151d2e;
+    --bg-card-hover: #1a2540;
+    --bg-input: #0d1321;
+    --border: #1e2d45;
+    --border-subtle: #162033;
+    --text-primary: #e2e8f0;
+    --text-secondary: #8896b0;
+    --text-muted: #556480;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.15);
+    --green: #10b981;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --orange: #f97316;
+    --purple: #8b5cf6;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'DM Sans', system-ui, sans-serif;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Background Grid Effect ────────────────────── */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image:
+      linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Layout ─────────────────────────────────────── */
+  .app { position: relative; z-index: 1; }
+
+  .topbar {
+    background: rgba(17, 24, 39, 0.8);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    background: var(--green);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .stat-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .stat-pill strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  /* ── Footer ─────────────────────────────────────── */
+  .app-footer {
+    text-align: center;
+    padding: 32px 24px 24px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.4;
+    letter-spacing: 0.05em;
+    transition: opacity 0.2s;
+    user-select: none;
+  }
+  .app-footer:hover { opacity: 0.75; }
+
+  /* ── Main Content ───────────────────────────────── */
+  .main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  /* ── Stats Row ──────────────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .stat-card:hover { border-color: var(--accent); }
+
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .stat-card:hover::after { opacity: 1; }
+
+  .stat-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.green { color: var(--green); }
+  .stat-value.yellow { color: var(--yellow); }
+
+  /* ── Channels + Feed Layout ─────────────────────── */
+  .content-grid {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 900px) {
+    .content-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ── Channel Sidebar ────────────────────────────── */
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .channel-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .channel-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border);
+    transform: translateX(2px);
+  }
+
+  .channel-card.active {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+  }
+
+  .channel-icon {
+    font-size: 20px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+    flex-shrink: 0;
+  }
+
+  .channel-info { flex: 1; min-width: 0; }
+
+  .channel-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .channel-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .btn-add-channel {
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .btn-add-channel:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-glow);
+  }
+
+  /* ── Feed ───────────────────────────────────────── */
+  .feed { display: flex; flex-direction: column; gap: 16px; }
+
+  .feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .feed-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .feed-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .search-input {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px 8px 36px;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    width: 240px;
+    outline: none;
+    transition: border-color 0.15s;
+    position: relative;
+  }
+
+  .search-input:focus { border-color: var(--accent); }
+
+  .search-wrapper { position: relative; }
+  .search-wrapper::before {
+    content: '⌕';
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 15px;
+    pointer-events: none;
+  }
+
+  .btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 16px;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+
+  .btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+    border-color: var(--accent);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+  }
+
+  .btn-danger { color: var(--red); }
+  .btn-danger:hover {
+    border-color: var(--red);
+    background: rgba(239, 68, 68, 0.1);
+  }
+
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* ── Webhook Cards ──────────────────────────────── */
+  .webhook-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .webhook-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: all 0.15s;
+    animation: slideIn 0.2s ease;
+    position: relative;
+  }
+
+  .webhook-card:hover {
+    border-color: rgba(59, 130, 246, 0.3);
+    background: var(--bg-card-hover);
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .webhook-card-priority {
+    position: absolute;
+    left: 0; top: 12px; bottom: 12px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+  }
+
+  .priority-low      { background: var(--text-muted); }
+  .priority-normal   { background: var(--accent); }
+  .priority-high     { background: var(--yellow); }
+  .priority-critical { background: var(--red); box-shadow: 0 0 8px rgba(239,68,68,0.3); }
+
+  .webhook-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .webhook-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .webhook-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .webhook-channel-tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .webhook-time {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .webhook-message {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .webhook-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+
+  .pushover-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .pushover-badge.failed { color: var(--red); }
+
+  /* ── Detail Modal ───────────────────────────────── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .modal-overlay.visible { display: flex; }
+
+  .modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    max-width: 700px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    animation: modalIn 0.2s ease;
+  }
+
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .modal-title { font-size: 16px; font-weight: 700; }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .modal-close:hover { color: var(--text-primary); background: var(--bg-card); }
+
+  .modal-body { padding: 24px; }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 12px 16px;
+    font-size: 13px;
+  }
+
+  .detail-label { color: var(--text-muted); font-weight: 500; text-align: right; }
+  .detail-value { color: var(--text-primary); word-break: break-all; }
+
+  .raw-body {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+    line-height: 1.6;
+    margin-top: 16px;
+  }
+
+  /* ── Channel Modal ──────────────────────────────── */
+  .form-group { margin-bottom: 16px; }
+
+  .form-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .form-input, .form-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .form-input:focus, .form-select:focus { border-color: var(--accent); }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .form-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .form-check input {
+    accent-color: var(--accent);
+    width: 16px; height: 16px;
+  }
+
+  .modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* ── Settings Modal ─────────────────────────────── */
+  .settings-section {
+    padding-bottom: 24px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .settings-section:last-child {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+  }
+
+  .settings-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 16px;
+  }
+
+  .form-row-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+
+  .notif-status { display: flex; flex-direction: column; gap: 10px; }
+
+  .notif-status-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .notif-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .notif-dot.on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .notif-dot.off { background: var(--text-muted); }
+
+  .notif-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 12px;
+  }
+
+  /* ── Empty State ────────────────────────────────── */
+  .empty-state {
+    text-align: center;
+    padding: 64px 24px;
+    color: var(--text-muted);
+  }
+
+  .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+  .empty-text { font-size: 15px; margin-bottom: 8px; color: var(--text-secondary); }
+
+  .empty-sub {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    display: inline-block;
+    margin-top: 12px;
+    user-select: all;
+  }
+
+  /* ── Pagination ─────────────────────────────────── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  /* ── Priority Filter Tabs ───────────────────────── */
+  .filter-tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 3px;
+  }
+
+  .filter-tab {
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: var(--font-sans);
+  }
+
+  .filter-tab:hover { color: var(--text-secondary); }
+  .filter-tab.active { background: var(--bg-card); color: var(--text-primary); }
+
+  /* ── Scrollbar ──────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  /* ── Toast ──────────────────────────────────────── */
+  .toast-container {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    z-index: 300;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .toast {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-primary);
+    animation: toastIn 0.2s ease, toastOut 0.3s ease 3s forwards;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+
+  .toast.success { border-left: 3px solid var(--green); }
+  .toast.error   { border-left: 3px solid var(--red); }
+
+  @keyframes toastIn  { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+  /* ── Auto-refresh indicator ─────────────────────── */
+  .refresh-indicator {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .refresh-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: none;
+  }
+  .refresh-spinner.active { display: block; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Context Menu ───────────────────────────────── */
+  .context-menu {
+    position: fixed;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    z-index: 400;
+    min-width: 140px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    display: none;
+  }
+
+  .context-menu.visible { display: block; }
+
+  .context-menu-item {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.1s;
+    user-select: none;
+  }
+
+  .context-menu-item.danger { color: var(--red); }
+  .context-menu-item.danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--red);
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="status-dot"></div>
+      <div class="logo" id="headerText">WebhookHub</div>
+    </div>
+    <div class="topbar-right">
+      <div class="stat-pill">Today: <strong id="todayCount">0</strong></div>
+      <div class="stat-pill">Total: <strong id="totalCount">0</strong></div>
+      <div class="refresh-indicator">
+        <div class="refresh-spinner" id="refreshSpinner"></div>
+        <span id="refreshText">Live</span>
+      </div>
+      <button class="btn btn-sm" onclick="sendTest()">Send Test</button>
+      <button class="btn btn-sm" onclick="showSettingsModal()">⚙ Settings</button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Stats -->
+    <section class="stats-grid" id="statsGrid"></section>
+
+    <!-- Content -->
+    <div class="content-grid">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">Channels</span>
+        </div>
+        <div class="channel-card active" data-channel="" onclick="selectChannel(this, '')">
+          <div class="channel-icon">📊</div>
+          <div class="channel-info">
+            <div class="channel-name">All Channels</div>
+            <div class="channel-count" id="allCount">0 webhooks</div>
+          </div>
+        </div>
+        <div id="channelList"></div>
+        <button class="btn-add-channel" onclick="showChannelModal()">+ Add Channel</button>
+      </aside>
+
+      <!-- Feed -->
+      <div class="feed">
+        <div class="feed-header">
+          <div class="feed-title" id="feedTitle">All Webhooks</div>
+          <div class="feed-controls">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-priority="" onclick="selectPriority(this, '')">All</button>
+              <button class="filter-tab" data-priority="critical" onclick="selectPriority(this, 'critical')">Critical</button>
+              <button class="filter-tab" data-priority="high" onclick="selectPriority(this, 'high')">High</button>
+              <button class="filter-tab" data-priority="normal" onclick="selectPriority(this, 'normal')">Normal</button>
+              <button class="filter-tab" data-priority="low" onclick="selectPriority(this, 'low')">Low</button>
+            </div>
+            <div class="search-wrapper">
+              <input type="text" class="search-input" placeholder="Search webhooks..." id="searchInput" oninput="debounceSearch()">
+            </div>
+          </div>
+        </div>
+        <div class="webhook-list" id="webhookList"></div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <span id="footerText">WebhookHub v1.0</span>
+  </footer>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detailModal" onclick="if(event.target===this)closeDetailModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="detailTitle">Webhook Detail</div>
+      <button class="modal-close" onclick="closeDetailModal()">×</button>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+  </div>
+</div>
+
+<!-- Channel Modal -->
+<div class="modal-overlay" id="channelModal" onclick="if(event.target===this)closeChannelModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="channelModalTitle">Add Channel</div>
+      <button class="modal-close" onclick="closeChannelModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Slug (URL path)</label>
+        <input type="text" class="form-input" id="chSlug" placeholder="e.g. uptime-kuma" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9\-]/g,'')">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Display Name</label>
+          <input type="text" class="form-input" id="chName" placeholder="e.g. Uptime Kuma">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Icon (emoji)</label>
+          <input type="text" class="form-input" id="chIcon" value="📡" maxlength="4" style="width:80px">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input type="text" class="form-input" id="chDesc" placeholder="What sends to this channel?">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Color</label>
+          <input type="color" class="form-input" id="chColor" value="#6366f1" style="padding:4px;height:42px">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Pushover Sound</label>
+          <select class="form-select" id="chSound">
+            <option value="pushover">Default (pushover)</option>
+            <option value="bike">Bike</option>
+            <option value="bugle">Bugle</option>
+            <option value="cashregister">Cash Register</option>
+            <option value="classical">Classical</option>
+            <option value="cosmic">Cosmic</option>
+            <option value="falling">Falling</option>
+            <option value="gamelan">Gamelan</option>
+            <option value="incoming">Incoming</option>
+            <option value="intermission">Intermission</option>
+            <option value="magic">Magic</option>
+            <option value="mechanical">Mechanical</option>
+            <option value="pianobar">Piano Bar</option>
+            <option value="siren">Siren</option>
+            <option value="spacealarm">Space Alarm</option>
+            <option value="tugboat">Tugboat</option>
+            <option value="alien">Alien (long)</option>
+            <option value="climb">Climb (long)</option>
+            <option value="persistent">Persistent (long)</option>
+            <option value="echo">Echo (long)</option>
+            <option value="updown">Up Down (long)</option>
+            <option value="vibrate">Vibrate Only</option>
+            <option value="none">None (silent)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Pushover Priority</label>
+          <select class="form-select" id="chPriority">
+            <option value="-1">Low (-1)</option>
+            <option value="0" selected>Normal (0)</option>
+            <option value="1">High (1)</option>
+            <option value="2">Emergency (2)</option>
+          </select>
+        </div>
+        <div class="form-group" style="display:flex;align-items:end;padding-bottom:4px">
+          <label class="form-check">
+            <input type="checkbox" id="chPushEnabled" checked>
+            Enable Pushover
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeChannelModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveChannel()">Save Channel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettingsModal()">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <div class="modal-title">Settings</div>
+      <button class="modal-close" onclick="closeSettingsModal()">×</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Branding -->
+      <div class="settings-section">
+        <div class="settings-section-title">Branding</div>
+        <div class="form-group">
+          <label class="form-label">Page Title (browser tab)</label>
+          <input type="text" class="form-input" id="s_site_title" placeholder="WebhookHub">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Header Text</label>
+          <input type="text" class="form-input" id="s_header_text" placeholder="WebhookHub">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Favicon URL</label>
+          <input type="text" class="form-input" id="s_favicon_url" placeholder="/static/favicon.svg">
+        </div>
+      </div>
+
+      <!-- Typography -->
+      <div class="settings-section">
+        <div class="settings-section-title">Typography</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Font Family</label>
+            <select class="form-select" id="s_font_family">
+              <option value="DM Sans">DM Sans (default)</option>
+              <option value="Inter">Inter</option>
+              <option value="Roboto">Roboto</option>
+              <option value="Nunito">Nunito</option>
+              <option value="JetBrains Mono">JetBrains Mono</option>
+              <option value="system-ui">System UI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Font Size</label>
+            <select class="form-select" id="s_font_size">
+              <option value="12">Small (12px)</option>
+              <option value="13">Compact (13px)</option>
+              <option value="14">Normal (14px)</option>
+              <option value="15">Large (15px)</option>
+              <option value="16">Extra Large (16px)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label">Accent Color</label>
+            <input type="color" class="form-input" id="s_color_accent" style="padding:4px;height:42px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Primary Text</label>
+            <input type="color" class="form-input" id="s_color_text_primary" style="padding:4px;height:42px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Secondary Text</label>
+            <input type="color" class="form-input" id="s_color_text_secondary" style="padding:4px;height:42px">
+          </div>
+        </div>
+      </div>
+
+      <!-- Notification Status -->
+      <div class="settings-section">
+        <div class="settings-section-title">Notification Backends</div>
+        <div class="notif-status" id="notifStatus">
+          <div class="notif-status-item">
+            <div class="notif-dot off"></div>
+            <span>Loading…</span>
+          </div>
+        </div>
+        <div class="notif-hint">Configure via environment variables in docker-compose.yml</div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="resetSettings()" style="margin-right:auto">Reset Defaults</button>
+      <button class="btn" onclick="closeSettingsModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context Menu -->
+<div class="context-menu" id="contextMenu">
+  <div class="context-menu-item danger" onclick="contextMenuDelete()">🗑 Delete</div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+
+const DEFAULT_SETTINGS = {
+  site_title:           'WebhookHub',
+  header_text:          'WebhookHub',
+  favicon_url:          '/static/favicon.svg',
+  font_family:          'DM Sans',
+  font_size:            '14',
+  color_accent:         '#3b82f6',
+  color_text_primary:   '#e2e8f0',
+  color_text_secondary: '#8896b0',
+};
+
+let state = {
+  channels:        [],
+  webhooks:        [],
+  activeChannel:   '',
+  activePriority:  '',
+  searchQuery:     '',
+  offset:          0,
+  limit:           50,
+  total:           0,
+  settings:        { ...DEFAULT_SETTINGS },
+  refreshInterval: null,
+};
+
+const BASE = window.location.origin;
+
+// ── API helper ────────────────────────────────────────────────────────────────
+
+async function api(path, opts = {}) {
+  const res = await fetch(BASE + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// ── Param builder ─────────────────────────────────────────────────────────────
+
+function buildWebhookParams() {
+  let p = `?limit=${state.limit}&offset=${state.offset}`;
+  if (state.activeChannel)  p += `&channel=${state.activeChannel}`;
+  if (state.activePriority) p += `&priority=${state.activePriority}`;
+  if (state.searchQuery)    p += `&search=${encodeURIComponent(state.searchQuery)}`;
+  return p;
+}
+
+// ── Load all (flicker-free: fetch everything first, then render in one pass) ──
+
+async function loadAll() {
+  document.getElementById('refreshSpinner').classList.add('active');
+  try {
+    const [stats, channels, data] = await Promise.all([
+      api('/api/stats'),
+      api('/api/channels'),
+      api('/api/webhooks' + buildWebhookParams()),
+    ]);
+
+    // Update state
+    state.channels = channels;
+    state.webhooks = data.webhooks;
+    state.total    = data.total;
+
+    // Single synchronous DOM pass — no intermediate blank state visible to browser
+    renderStats(stats);
+    renderChannels();
+    renderWebhooks();
+    renderPagination();
+
+    document.getElementById('todayCount').textContent = stats.today_count;
+    document.getElementById('totalCount').textContent = stats.total_webhooks;
+    document.getElementById('allCount').textContent   = `${stats.total_webhooks} webhooks`;
+  } finally {
+    document.getElementById('refreshSpinner').classList.remove('active');
+  }
+}
+
+// ── Render functions ──────────────────────────────────────────────────────────
+
+function renderStats(stats) {
+  const cards = [
+    { label: 'Total Today',   value: stats.today_count,               cls: 'accent'  },
+    { label: 'Pushover Sent', value: stats.pushover_sent,             cls: 'green'   },
+    { label: 'Critical',      value: stats.by_priority.critical || 0, cls: ''        },
+    { label: 'High Priority', value: stats.by_priority.high    || 0,  cls: 'yellow'  },
+  ];
+  document.getElementById('statsGrid').innerHTML = cards.map(c => `
+    <div class="stat-card">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value ${c.cls}">${c.value}</div>
+    </div>
+  `).join('');
+}
+
+function renderChannels() {
+  document.getElementById('channelList').innerHTML = state.channels.map(ch => `
+    <div class="channel-card ${state.activeChannel === ch.slug ? 'active' : ''}"
+         data-channel="${ch.slug}"
+         onclick="selectChannel(this, '${ch.slug}')"
+         oncontextmenu="showContextMenu(event,'channel','${ch.slug}')">
+      <div class="channel-icon">${ch.icon}</div>
+      <div class="channel-info">
+        <div class="channel-name">${esc(ch.name)}</div>
+        <div class="channel-count">${ch.webhook_count} webhooks${ch.last_received ? ' · ' + timeAgo(ch.last_received) : ''}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderWebhooks() {
+  const list = document.getElementById('webhookList');
+
+  if (state.webhooks.length === 0) {
+    const slug = state.activeChannel || '{channel}';
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <div class="empty-text">No webhooks yet</div>
+        <div class="empty-sub">curl -X POST ${BASE}/webhook/${slug} \\<br>  -H "Content-Type: application/json" \\<br>  -d '{"title":"Hello","message":"First webhook!"}'</div>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = state.webhooks.map(w => {
+    const ch     = state.channels.find(c => c.slug === w.channel_slug) || {};
+    const tagBg  = ch.color ? ch.color + '22' : 'var(--accent-glow)';
+    const tagClr = ch.color || 'var(--accent)';
+    return `
+      <div class="webhook-card"
+           onclick="showDetail(${w.id})"
+           oncontextmenu="showContextMenu(event,'webhook',${w.id})">
+        <div class="webhook-card-priority priority-${w.priority}"></div>
+        <div class="webhook-top">
+          <div class="webhook-title">${esc(w.title || 'Untitled')}</div>
+          <div class="webhook-meta">
+            <span class="webhook-channel-tag" style="background:${tagBg};color:${tagClr}">${ch.icon || '📡'} ${esc(w.channel_slug)}</span>
+            <span class="webhook-time">${timeAgo(w.received_at)}</span>
+          </div>
+        </div>
+        <div class="webhook-message">${esc(w.message)}</div>
+        <div class="webhook-footer">
+          ${w.pushover_sent
+            ? '<span class="pushover-badge">✓ Pushover sent</span>'
+            : '<span class="pushover-badge failed">○ No push</span>'}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderPagination() {
+  const pag     = document.getElementById('pagination');
+  const pages   = Math.ceil(state.total / state.limit);
+  const current = Math.floor(state.offset / state.limit) + 1;
+
+  if (pages <= 1) { pag.innerHTML = ''; return; }
+
+  let html = '';
+  if (current > 1) html += `<button class="btn btn-sm" onclick="goPage(${current - 1})">← Prev</button>`;
+  html += `<span>Page ${current} of ${pages} (${state.total} total)</span>`;
+  if (current < pages) html += `<button class="btn btn-sm" onclick="goPage(${current + 1})">Next →</button>`;
+  pag.innerHTML = html;
+}
+
+// ── Navigation actions ────────────────────────────────────────────────────────
+
+function selectChannel(el, slug) {
+  document.querySelectorAll('.channel-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  state.activeChannel = slug;
+  state.offset = 0;
+  document.getElementById('feedTitle').textContent =
+    slug ? (state.channels.find(c => c.slug === slug)?.name || slug) : 'All Webhooks';
+  loadAll();
+}
+
+function selectPriority(el, priority) {
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  state.activePriority = priority;
+  state.offset = 0;
+  loadAll();
+}
+
+let searchTimeout;
+function debounceSearch() {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    state.searchQuery = document.getElementById('searchInput').value;
+    state.offset = 0;
+    loadAll();
+  }, 300);
+}
+
+function goPage(page) {
+  state.offset = (page - 1) * state.limit;
+  loadAll();
+}
+
+// ── Detail Modal ──────────────────────────────────────────────────────────────
+
+async function showDetail(id) {
+  const w  = await api(`/api/webhooks/${id}`);
+  const ch = state.channels.find(c => c.slug === w.channel_slug) || {};
+
+  document.getElementById('detailTitle').textContent = w.title || 'Webhook Detail';
+
+  let parsedBody = '';
+  try { parsedBody = JSON.stringify(JSON.parse(w.raw_body), null, 2); }
+  catch { parsedBody = w.raw_body; }
+
+  document.getElementById('detailBody').innerHTML = `
+    <div class="detail-grid">
+      <div class="detail-label">ID</div>       <div class="detail-value">#${w.id}</div>
+      <div class="detail-label">Channel</div>  <div class="detail-value">${ch.icon || '📡'} ${esc(w.channel_slug)}</div>
+      <div class="detail-label">Priority</div> <div class="detail-value">${w.priority}</div>
+      <div class="detail-label">Source IP</div><div class="detail-value">${esc(w.source_ip)}</div>
+      <div class="detail-label">Received</div> <div class="detail-value">${new Date(w.received_at + 'Z').toLocaleString()}</div>
+      <div class="detail-label">Pushover</div> <div class="detail-value">${w.pushover_sent ? '✅ Sent' : '❌ Not sent'}</div>
+      <div class="detail-label">Message</div>  <div class="detail-value">${esc(w.message)}</div>
+    </div>
+    <div style="margin-top:20px">
+      <div class="form-label">Raw Payload</div>
+      <pre class="raw-body">${esc(parsedBody)}</pre>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-sm btn-danger" onclick="deleteWebhook(${w.id})">Delete</button>
+    </div>
+  `;
+
+  document.getElementById('detailModal').classList.add('visible');
+}
+
+function closeDetailModal() {
+  document.getElementById('detailModal').classList.remove('visible');
+}
+
+async function deleteWebhook(id) {
+  await api(`/api/webhooks/${id}`, { method: 'DELETE' });
+  closeDetailModal();
+  toast('Webhook deleted', 'success');
+  loadAll();
+}
+
+// ── Channel Modal ─────────────────────────────────────────────────────────────
+
+function showChannelModal() {
+  document.getElementById('chSlug').value           = '';
+  document.getElementById('chName').value           = '';
+  document.getElementById('chDesc').value           = '';
+  document.getElementById('chIcon').value           = '📡';
+  document.getElementById('chColor').value          = '#6366f1';
+  document.getElementById('chSound').value          = 'pushover';
+  document.getElementById('chPriority').value       = '0';
+  document.getElementById('chPushEnabled').checked  = true;
+  document.getElementById('channelModalTitle').textContent = 'Add Channel';
+  document.getElementById('channelModal').classList.add('visible');
+}
+
+function closeChannelModal() {
+  document.getElementById('channelModal').classList.remove('visible');
+}
+
+async function saveChannel() {
+  const slug = document.getElementById('chSlug').value.trim();
+  if (!slug) { toast('Slug is required', 'error'); return; }
+
+  try {
+    await api('/api/channels', {
+      method: 'POST',
+      body: JSON.stringify({
+        slug,
+        name:             document.getElementById('chName').value || slug,
+        description:      document.getElementById('chDesc').value,
+        icon:             document.getElementById('chIcon').value || '📡',
+        color:            document.getElementById('chColor').value,
+        pushover_sound:   document.getElementById('chSound').value,
+        pushover_priority: parseInt(document.getElementById('chPriority').value),
+        pushover_enabled: document.getElementById('chPushEnabled').checked,
+      }),
+    });
+    closeChannelModal();
+    toast('Channel created!', 'success');
+    loadAll();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+const GOOGLE_FONTS = {
+  'Inter':  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap',
+  'Roboto': 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap',
+  'Nunito': 'https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap',
+};
+
+function loadFont(name) {
+  if (!GOOGLE_FONTS[name]) return;
+  const id = 'gf-' + name.replace(/\s/g, '-');
+  if (document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id   = id;
+  link.rel  = 'stylesheet';
+  link.href = GOOGLE_FONTS[name];
+  document.head.appendChild(link);
+}
+
+function applySettings(s) {
+  // CSS variables
+  document.documentElement.style.setProperty('--accent',         s.color_accent);
+  document.documentElement.style.setProperty('--accent-glow',    s.color_accent + '26');
+  document.documentElement.style.setProperty('--text-primary',   s.color_text_primary);
+  document.documentElement.style.setProperty('--text-secondary', s.color_text_secondary);
+
+  // Font
+  loadFont(s.font_family);
+  document.documentElement.style.setProperty(
+    '--font-sans', `'${s.font_family}', system-ui, sans-serif`
+  );
+
+  // Font size via zoom on app wrapper
+  document.getElementById('app').style.zoom = (parseInt(s.font_size, 10) / 14).toString();
+
+  // Page title & branding
+  document.title = s.site_title;
+  document.getElementById('headerText').textContent = s.header_text;
+  document.getElementById('footerText').textContent = s.header_text + ' v1.0';
+
+  // Favicon
+  document.getElementById('faviconEl').href = s.favicon_url;
+
+  state.settings = { ...s };
+}
+
+async function loadSettings() {
+  try {
+    const s = await api('/api/settings');
+    applySettings(s);
+  } catch (e) {
+    console.warn('Could not load settings:', e);
+  }
+}
+
+function showSettingsModal() {
+  const s = state.settings;
+  document.getElementById('s_site_title').value          = s.site_title;
+  document.getElementById('s_header_text').value         = s.header_text;
+  document.getElementById('s_favicon_url').value         = s.favicon_url;
+  document.getElementById('s_font_family').value         = s.font_family;
+  document.getElementById('s_font_size').value           = s.font_size;
+  document.getElementById('s_color_accent').value        = s.color_accent;
+  document.getElementById('s_color_text_primary').value  = s.color_text_primary;
+  document.getElementById('s_color_text_secondary').value = s.color_text_secondary;
+
+  // Load notification status
+  api('/api/notification-status').then(status => {
+    const services = [
+      { key: 'pushover', label: 'Pushover' },
+      { key: 'discord',  label: 'Discord'  },
+      { key: 'smtp',     label: 'SMTP Email' },
+    ];
+    document.getElementById('notifStatus').innerHTML = services.map(svc => `
+      <div class="notif-status-item">
+        <div class="notif-dot ${status[svc.key] ? 'on' : 'off'}"></div>
+        <span>${svc.label}: ${status[svc.key] ? 'Configured' : 'Not configured'}</span>
+      </div>
+    `).join('');
+  }).catch(() => {
+    document.getElementById('notifStatus').innerHTML =
+      '<div class="notif-status-item"><span style="color:var(--text-muted)">Could not load status</span></div>';
+  });
+
+  document.getElementById('settingsModal').classList.add('visible');
+}
+
+function closeSettingsModal() {
+  document.getElementById('settingsModal').classList.remove('visible');
+}
+
+async function saveSettings() {
+  const payload = {
+    site_title:           document.getElementById('s_site_title').value.trim()  || DEFAULT_SETTINGS.site_title,
+    header_text:          document.getElementById('s_header_text').value.trim() || DEFAULT_SETTINGS.header_text,
+    favicon_url:          document.getElementById('s_favicon_url').value.trim() || DEFAULT_SETTINGS.favicon_url,
+    font_family:          document.getElementById('s_font_family').value,
+    font_size:            document.getElementById('s_font_size').value,
+    color_accent:         document.getElementById('s_color_accent').value,
+    color_text_primary:   document.getElementById('s_color_text_primary').value,
+    color_text_secondary: document.getElementById('s_color_text_secondary').value,
+  };
+
+  try {
+    await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
+    applySettings(payload);
+    closeSettingsModal();
+    toast('Settings saved', 'success');
+  } catch (e) {
+    toast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function resetSettings() {
+  try {
+    await api('/api/settings', { method: 'POST', body: JSON.stringify(DEFAULT_SETTINGS) });
+    applySettings(DEFAULT_SETTINGS);
+    closeSettingsModal();
+    toast('Settings reset to defaults', 'success');
+  } catch (e) {
+    toast('Reset failed: ' + e.message, 'error');
+  }
+}
+
+// ── Test Notification ─────────────────────────────────────────────────────────
+
+async function sendTest() {
+  try {
+    const res = await api('/api/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        channel: state.activeChannel || 'general',
+        title:   'Test Notification',
+        message: `Test from WebhookHub at ${new Date().toLocaleTimeString()}`,
+      }),
+    });
+    toast(
+      res.pushover_sent ? 'Test sent + Pushover delivered!' : 'Test stored (check notification config)',
+      res.pushover_sent ? 'success' : 'error'
+    );
+    loadAll();
+  } catch (e) {
+    toast('Test failed: ' + e.message, 'error');
+  }
+}
+
+// ── Context Menu ──────────────────────────────────────────────────────────────
+
+let ctxTarget = null;
+
+function showContextMenu(e, type, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  ctxTarget = { type, id };
+  const menu = document.getElementById('contextMenu');
+  menu.style.left = e.clientX + 'px';
+  menu.style.top  = e.clientY + 'px';
+  menu.classList.add('visible');
+}
+
+function hideContextMenu() {
+  document.getElementById('contextMenu').classList.remove('visible');
+  ctxTarget = null;
+}
+
+async function contextMenuDelete() {
+  if (!ctxTarget) return;
+  const target = ctxTarget;
+  hideContextMenu();
+  try {
+    if (target.type === 'webhook') {
+      await api(`/api/webhooks/${target.id}`, { method: 'DELETE' });
+      toast('Webhook deleted', 'success');
+    } else if (target.type === 'channel') {
+      await api(`/api/channels/${target.id}`, { method: 'DELETE' });
+      toast('Channel deleted', 'success');
+    }
+    loadAll();
+  } catch (e) {
+    toast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+document.addEventListener('click', hideContextMenu);
+document.addEventListener('contextmenu', (e) => {
+  if (!e.target.closest('.context-menu')) hideContextMenu();
+});
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  const d    = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+  const diff = (Date.now() - d) / 1000;
+  if (diff < 60)     return 'just now';
+  if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return d.toLocaleDateString();
+}
+
+function toast(msg, type = 'success') {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeDetailModal();
+    closeChannelModal();
+    closeSettingsModal();
+    hideContextMenu();
+  }
+  if (e.key === '/' && !e.ctrlKey && document.activeElement.tagName !== 'INPUT') {
+    e.preventDefault();
+    document.getElementById('searchInput').focus();
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await loadSettings();             // Apply persisted settings before first render
+  await loadAll();
+  state.refreshInterval = setInterval(loadAll, 10000);
+}
+
+init();
+</script>
+</body>
+</html>
