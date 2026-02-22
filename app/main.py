@@ -455,8 +455,20 @@ async def receive_webhook(channel_slug: str, request: Request):
     if request.query_params.get("message"):  parsed["message"]  = request.query_params["message"]
     if request.query_params.get("priority"): parsed["priority"] = request.query_params["priority"]
 
-    # Extract optional enrichment fields from payload
+    # Determine whether push notifications should be suppressed.
+    # Payload field "push": false/0/"false"/"no" suppresses Pushover only.
+    # Query param ?push=false has the same effect. Absent = send as normal.
     d = data if isinstance(data, dict) else {}
+    _push_raw = d.get("push")
+    _push_qp  = request.query_params.get("push")
+    if _push_qp is not None:
+        suppress_push = str(_push_qp).lower() in ("false", "0", "no")
+    elif _push_raw is not None:
+        suppress_push = str(_push_raw).lower() in ("false", "0", "no")
+    else:
+        suppress_push = False
+
+    # Extract optional enrichment fields from payload
     extra = {
         "player":          str(d.get("player") or ""),
         "user_name":       str(d.get("user") or d.get("username") or d.get("user_name") or ""),
@@ -492,7 +504,7 @@ async def receive_webhook(channel_slug: str, request: Request):
 
     # Pushover
     pushover_sent = False
-    if channel["pushover_enabled"]:
+    if channel["pushover_enabled"] and not suppress_push:
         po_priority = PRIORITY_TO_PUSHOVER.get(parsed["priority"], 0)
         if channel["pushover_priority"] > po_priority:
             po_priority = channel["pushover_priority"]
