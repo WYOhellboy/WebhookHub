@@ -56,6 +56,9 @@ DEFAULT_SETTINGS = {
     "color_accent":         "#3b82f6",
     "color_text_primary":   "#e2e8f0",
     "color_text_secondary": "#8896b0",
+    "cleanup_enabled":      "0",
+    "cleanup_days":         "30",
+    "cleanup_last_run":     "",
 }
 
 
@@ -306,6 +309,46 @@ async def send_smtp(title: str, message: str, channel_name: str = "", extra: dic
         return False
 
 
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+
+async def _run_cleanup():
+    """Delete webhooks older than cleanup_days. Returns count of deleted rows."""
+    db = get_db()
+    try:
+        enabled_row = db.execute("SELECT value FROM settings WHERE key='cleanup_enabled'").fetchone()
+        days_row    = db.execute("SELECT value FROM settings WHERE key='cleanup_days'").fetchone()
+        enabled = (enabled_row["value"] if enabled_row else "0") == "1"
+        days    = int(days_row["value"] if days_row else "30")
+        if not enabled or days <= 0:
+            return 0
+        db.execute(
+            "DELETE FROM webhooks WHERE received_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        count = db.execute("SELECT changes()").fetchone()[0]
+        db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('cleanup_last_run', ?)",
+            (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),),
+        )
+        db.commit()
+        if count > 0:
+            print(f"[cleanup] Deleted {count} webhooks older than {days} days")
+        return count
+    except Exception as e:
+        print(f"[cleanup] Error: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+async def cleanup_loop():
+    """Background task: run cleanup on startup then every hour."""
+    await asyncio.sleep(5)      # let the app finish initialising
+    while True:
+        await _run_cleanup()
+        await asyncio.sleep(3600)
+
+
 # ── Webhook Parsers ───────────────────────────────────────────────────────────
 
 def parse_tautulli(data: dict) -> dict:
@@ -344,7 +387,13 @@ PARSERS = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    task = asyncio.create_task(cleanup_loop())
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="WebhookHub", version="1.0.0", lifespan=lifespan)

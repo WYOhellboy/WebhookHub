@@ -1060,13 +1060,37 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Font Family</label>
-            <select class="form-select" id="s_font_family">
-              <option value="DM Sans">DM Sans (default)</option>
-              <option value="Inter">Inter</option>
-              <option value="Roboto">Roboto</option>
-              <option value="Nunito">Nunito</option>
-              <option value="JetBrains Mono">JetBrains Mono</option>
-              <option value="system-ui">System UI</option>
+            <select class="form-select" id="s_font_family" onchange="applyFont(this.value)">
+              <optgroup label="── Sans-serif ──">
+                <option value="DM Sans">DM Sans (default)</option>
+                <option value="Inter">Inter</option>
+                <option value="Roboto">Roboto</option>
+                <option value="Nunito">Nunito</option>
+                <option value="Poppins">Poppins</option>
+                <option value="Lato">Lato</option>
+                <option value="Montserrat">Montserrat</option>
+                <option value="Raleway">Raleway</option>
+                <option value="Oswald">Oswald</option>
+                <option value="Ubuntu">Ubuntu</option>
+                <option value="system-ui">System UI</option>
+                <option value="Arial">Arial</option>
+              </optgroup>
+              <optgroup label="── Serif ──">
+                <option value="Georgia">Georgia</option>
+                <option value="Times New Roman">Times New Roman</option>
+              </optgroup>
+              <optgroup label="── Monospace ──">
+                <option value="JetBrains Mono">JetBrains Mono</option>
+                <option value="Fira Code">Fira Code</option>
+                <option value="Courier New">Courier New</option>
+              </optgroup>
+              <optgroup label="── Fun / Decorative ──">
+                <option value="Comic Sans MS">Comic Sans MS</option>
+                <option value="Pacifico">Pacifico</option>
+                <option value="Permanent Marker">Permanent Marker</option>
+                <option value="Press Start 2P">Press Start 2P</option>
+                <option value="Bangers">Bangers</option>
+              </optgroup>
             </select>
           </div>
           <div class="form-group">
@@ -1108,6 +1132,25 @@
         <div class="notif-hint">Configure via environment variables in docker-compose.yml</div>
       </div>
 
+      <!-- Cleanup -->
+      <div class="settings-section">
+        <div class="settings-section-title">Automatic Cleanup</div>
+        <div class="form-group">
+          <label class="form-check">
+            <input type="checkbox" id="s_cleanup_enabled">
+            Enable automatic deletion of old webhooks
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Delete webhooks older than</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="number" class="form-input" id="s_cleanup_days" min="1" max="3650" style="width:100px">
+            <span style="color:var(--text-secondary);font-size:13px">days</span>
+          </div>
+        </div>
+        <div class="notif-hint" id="cleanupLastRun">Last cleanup: never</div>
+      </div>
+
     </div>
     <div class="modal-footer">
       <button class="btn btn-danger" onclick="resetSettings()" style="margin-right:auto">Reset Defaults</button>
@@ -1137,6 +1180,8 @@ const DEFAULT_SETTINGS = {
   color_accent:         '#3b82f6',
   color_text_primary:   '#e2e8f0',
   color_text_secondary: '#8896b0',
+  cleanup_enabled:      '0',
+  cleanup_days:         '30',
 };
 
 let state = {
@@ -1437,9 +1482,20 @@ async function saveChannel() {
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 const GOOGLE_FONTS = {
-  'Inter':  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap',
-  'Roboto': 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap',
-  'Nunito': 'https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap',
+  'Inter':            'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap',
+  'Roboto':           'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap',
+  'Nunito':           'https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap',
+  'Poppins':          'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap',
+  'Lato':             'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap',
+  'Montserrat':       'https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap',
+  'Raleway':          'https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&display=swap',
+  'Oswald':           'https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap',
+  'Ubuntu':           'https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&display=swap',
+  'Fira Code':        'https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&display=swap',
+  'Pacifico':         'https://fonts.googleapis.com/css2?family=Pacifico&display=swap',
+  'Permanent Marker': 'https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap',
+  'Press Start 2P':   'https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap',
+  'Bangers':          'https://fonts.googleapis.com/css2?family=Bangers&display=swap',
 };
 
 function loadFont(name) {
@@ -1453,6 +1509,29 @@ function loadFont(name) {
   document.head.appendChild(link);
 }
 
+function applyFont(fontFamily) {
+  loadFont(fontFamily);
+  const stack = `'${fontFamily}', system-ui, sans-serif`;
+  // Update CSS variable
+  document.documentElement.style.setProperty('--font-sans', stack);
+  // Also inject a <style> rule — more reliable than CSS variable alone
+  // because some browsers don't re-render font-family from custom property changes
+  let el = document.getElementById('wh-font-override');
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'wh-font-override';
+    document.head.appendChild(el);
+  }
+  el.textContent = `
+    :root { --font-sans: ${stack}; }
+    body, .btn, .btn-add-channel, .form-input, .form-select,
+    .filter-tab, .search-input, .channel-name, .channel-count,
+    .webhook-title, .webhook-message, .modal-title, .detail-value,
+    .form-label, .stat-label, .sidebar-title, .feed-title,
+    .context-menu-item, .notif-status-item, .settings-section-title { font-family: ${stack} !important; }
+  `;
+}
+
 function applySettings(s) {
   // CSS variables
   document.documentElement.style.setProperty('--accent',         s.color_accent);
@@ -1461,10 +1540,7 @@ function applySettings(s) {
   document.documentElement.style.setProperty('--text-secondary', s.color_text_secondary);
 
   // Font
-  loadFont(s.font_family);
-  document.documentElement.style.setProperty(
-    '--font-sans', `'${s.font_family}', system-ui, sans-serif`
-  );
+  applyFont(s.font_family);
 
   // Font size via zoom on app wrapper
   document.getElementById('app').style.zoom = (parseInt(s.font_size, 10) / 14).toString();
@@ -1500,6 +1576,14 @@ function showSettingsModal() {
   document.getElementById('s_color_text_primary').value  = s.color_text_primary;
   document.getElementById('s_color_text_secondary').value = s.color_text_secondary;
 
+  // Cleanup
+  document.getElementById('s_cleanup_enabled').checked = s.cleanup_enabled === '1';
+  document.getElementById('s_cleanup_days').value      = s.cleanup_days || '30';
+  const lastRun = s.cleanup_last_run
+    ? 'Last cleanup: ' + new Date(s.cleanup_last_run).toLocaleString()
+    : 'Last cleanup: never';
+  document.getElementById('cleanupLastRun').textContent = lastRun;
+
   // Load notification status
   api('/api/notification-status').then(status => {
     const services = [
@@ -1526,6 +1610,7 @@ function closeSettingsModal() {
 }
 
 async function saveSettings() {
+  const cleanupDays = parseInt(document.getElementById('s_cleanup_days').value, 10);
   const payload = {
     site_title:           document.getElementById('s_site_title').value.trim()  || DEFAULT_SETTINGS.site_title,
     header_text:          document.getElementById('s_header_text').value.trim() || DEFAULT_SETTINGS.header_text,
@@ -1535,6 +1620,8 @@ async function saveSettings() {
     color_accent:         document.getElementById('s_color_accent').value,
     color_text_primary:   document.getElementById('s_color_text_primary').value,
     color_text_secondary: document.getElementById('s_color_text_secondary').value,
+    cleanup_enabled:      document.getElementById('s_cleanup_enabled').checked ? '1' : '0',
+    cleanup_days:         (cleanupDays > 0 ? cleanupDays : 30).toString(),
   };
 
   try {
