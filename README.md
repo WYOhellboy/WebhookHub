@@ -20,6 +20,9 @@ A self-hosted webhook receiver, dashboard, and push notification relay. Replace 
 - **Priority levels** — low / normal / high / critical with visual indicators
 - **Search & filter** — by channel, priority, and free-text search
 - **Automatic cleanup** — configurable background task to delete webhooks older than N days
+- **Flicker-free refresh** — keyed DOM reconciliation reuses existing cards; only new arrivals animate in
+- **Refresh countdown** — topbar shows a live countdown to the next poll instead of a static "Live" label
+- **Configurable refresh interval** — set the auto-refresh delay in seconds from the Settings page (min 5 s)
 - **Expanded font picker** — 20 fonts in 4 categories with live preview
 - **Mobile-responsive** — bottom-sheet modals, horizontal sidebar, stacked controls on small screens
 - **Dual-port design** — dashboard on 8080 (proxy-protected), ingest on 8181 (publicly reachable)
@@ -180,7 +183,9 @@ Open `http://your-server:8080` (or your proxy URL) to access the dashboard.
 - **Search bar** — full-text search across title and message (`/` to focus)
 - **Send Test button** — sends a test notification to all configured backends
 - **⚙ Settings button** — opens the settings panel
-- **Auto-refresh** — feed refreshes every 10 seconds without flickering
+- **Flicker-free auto-refresh** — existing cards are reused in-place; only genuinely new cards animate in
+- **Refresh countdown** — topbar shows a live `Xs` countdown to the next poll; resets after every fetch or user action
+- **Configurable interval** — default 10 s; change it in Settings → Dashboard without reloading the page
 - **Footer** — displays the app name and version; updates with your Header Text setting
 - **Mobile layout** — sidebar scrolls horizontally, modals open as bottom sheets, controls stack vertically on narrow screens
 
@@ -205,6 +210,12 @@ Click **⚙ Settings** in the top-right corner. Changes are saved to the databas
 | Accent Color | Color picker — affects buttons, links, active states, and stat highlights |
 | Primary Text | Color picker — main content text |
 | Secondary Text | Color picker — metadata and subdued text |
+
+### Dashboard
+
+| Setting | Description |
+|---------|-------------|
+| Auto-refresh interval | How often the feed polls for new webhooks, in seconds (minimum 5). Takes effect immediately on save — no page reload needed. Default: 10 s |
 
 ### Automatic Cleanup
 
