@@ -16,7 +16,7 @@ A self-hosted webhook receiver, dashboard, and push notification relay. Replace 
 - **Inline images** — images render as thumbnails in the feed and full-size in the detail modal; forwarded to Pushover (attachment), Discord (embed image), and HTML email
 - **Newline rendering** — `\n` in messages renders as line breaks in the dashboard
 - **Push suppression** — add `"push": false` to any payload to skip Pushover for that webhook
-- **Built-in parsers** — Tautulli parser included, generic parser handles everything else
+- **Built-in parsers** — Tautulli, Uptime Kuma, Grafana, GitHub, Gitea/Forgejo, Sonarr, Radarr, Lidarr, Readarr, Jellyfin, Netdata, Proxmox — plus a generic fallback
 - **Priority levels** — low / normal / high / critical with visual indicators
 - **Search & filter** — by channel, priority, and free-text search
 - **Automatic cleanup** — configurable background task to delete webhooks older than N days
@@ -426,23 +426,60 @@ All configuration is via environment variables in `docker-compose.yml`:
 | `SMTP_FROM`            | No       | Sender address                                          |
 | `SMTP_TO`              | No       | Recipient address(es), comma-separated                  |
 
+## Built-in Parsers
+
+A parser is selected automatically based on the channel slug in the URL. POST to `/webhook/sonarr` and the Sonarr parser runs; anything without a dedicated parser falls back to the generic one.
+
+| Channel slug | Platform | Notes |
+|---|---|---|
+| `tautulli` | Tautulli | Plex media server events |
+| `jellyfin` | Jellyfin | Playback, library, auth events (webhook plugin) |
+| `uptime-kuma` | Uptime Kuma | Monitor up/down alerts |
+| `grafana` | Grafana | Legacy alerting + new unified alerting (Grafana 8+) |
+| `netdata` | Netdata | CRITICAL / WARNING / CLEAR alerts |
+| `proxmox` | Proxmox VE 8.1+ | See Proxmox setup note below |
+| `github` | GitHub | Push, pull request, issue, release, workflow run, ping |
+| `gitea` | Gitea | Same payload structure as GitHub |
+| `forgejo` | Forgejo | Same payload structure as GitHub/Gitea |
+| `sonarr` | Sonarr | Download, Grab, Delete, Health, Update, Test |
+| `radarr` | Radarr | Download, Grab, Delete, Health, Update, Test |
+| `lidarr` | Lidarr | Download, Grab, Health, Test |
+| `readarr` | Readarr | Download, Grab, Health, Test |
+| *(anything else)* | Generic | Tries common field names; falls back to raw JSON |
+
+### Proxmox VE setup
+
+Proxmox 8.1+ uses a template-driven webhook body. In **Datacenter → Notifications → Add Webhook**, set the body template to:
+
+```
+{"title":"{{title}}","message":"{{message}}","severity":"{{severity}}","host":"{{host}}"}
+```
+
+Proxmox severity levels map to priorities as follows: `error` → critical, `warning` → high, `notice` → normal, `info` → low.
+
+### *arr apps (Sonarr / Radarr / Lidarr / Readarr)
+
+In each app go to **Settings → Connect → Add → Webhook** and set the URL to:
+
+```
+http://your-server:8181/webhook/sonarr   (or radarr / lidarr / readarr)
+```
+
+All event types are handled. Send a **Test** notification to verify the connection — it will appear in the feed as a low-priority card.
+
 ## Adding Custom Parsers
 
 Edit `app/main.py` and add a parser function to the `PARSERS` dict:
 
 ```python
-def parse_uptime_kuma(data: dict) -> dict:
-    """Custom parser for Uptime Kuma webhooks."""
-    monitor   = data.get("monitor", {})
-    heartbeat = data.get("heartbeat", {})
+def parse_myapp(data: dict) -> dict:
+    status = data.get("status", "unknown")
+    title  = f"MyApp: {data.get('name', 'Event')}"
+    msg    = data.get("details", status)
+    prio   = "critical" if status == "error" else "normal"
+    return {"title": title, "message": msg, "priority": prio}
 
-    title    = f"{monitor.get('name', 'Monitor')}: {heartbeat.get('status', 'unknown')}"
-    message  = heartbeat.get("msg", "")
-    priority = "critical" if heartbeat.get("status") == 0 else "normal"
-
-    return {"title": title, "message": message, "priority": priority}
-
-PARSERS["uptime-kuma"] = parse_uptime_kuma
+PARSERS["myapp"] = parse_myapp
 ```
 
 The parser receives the decoded JSON body and must return a dict with `title`, `message`, and `priority` keys. Rebuild the container after any code changes:

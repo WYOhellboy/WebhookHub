@@ -351,6 +351,19 @@ async def cleanup_loop():
 
 # ── Webhook Parsers ───────────────────────────────────────────────────────────
 
+def _arr_quality(q) -> str:
+    """Return a readable quality string from Sonarr/Radarr/Lidarr/Readarr quality fields
+    (may be a plain string, or a nested dict like {quality: {name: '...'}})."""
+    if isinstance(q, str):
+        return q
+    if isinstance(q, dict):
+        inner = q.get("quality", q)
+        if isinstance(inner, dict):
+            return inner.get("name", "")
+        return str(inner)
+    return ""
+
+
 def parse_tautulli(data: dict) -> dict:
     subject  = data.get("subject", data.get("title", "Tautulli Notification"))
     body     = data.get("body",    data.get("message", ""))
@@ -358,6 +371,426 @@ def parse_tautulli(data: dict) -> dict:
     title    = f"{action}: {subject}" if action else subject
     message  = body or json.dumps(data, indent=2)[:500]
     priority = "high" if action in ("buffer", "error") else "normal"
+    return {"title": title, "message": message, "priority": priority}
+
+
+def parse_uptime_kuma(data: dict) -> dict:
+    monitor   = data.get("monitor", {})
+    heartbeat = data.get("heartbeat", {})
+    status    = heartbeat.get("status")   # 1 = up, 0 = down
+    name      = monitor.get("name", "Monitor")
+    msg       = heartbeat.get("msg") or data.get("msg", "")
+    url       = monitor.get("url", "")
+
+    if status == 0:
+        title    = f"Monitor DOWN: {name}"
+        priority = "critical"
+    elif status == 1:
+        title    = f"Monitor UP: {name}"
+        priority = "normal"
+    else:
+        title    = f"Monitor Alert: {name}"
+        priority = "high"
+
+    parts = [msg] if msg else []
+    if url:
+        parts.append(url)
+    message = "\n".join(parts) or title
+    return {"title": title, "message": message, "priority": priority}
+
+
+def parse_grafana(data: dict) -> dict:
+    # New unified alerting (Grafana 8+): payload has an "alerts" list
+    if "alerts" in data:
+        alerts  = data.get("alerts", [])
+        status  = data.get("status", "firing")
+        first   = alerts[0] if alerts else {}
+        labels  = first.get("labels", {})
+        ann     = first.get("annotations", {})
+
+        alert_name = labels.get("alertname", "Grafana Alert")
+        severity   = labels.get("severity", "")
+        summary    = ann.get("summary") or ann.get("description") or ""
+        firing     = sum(1 for a in alerts if a.get("status") == "firing")
+        total      = len(alerts)
+
+        if status == "resolved":
+            title    = f"Resolved: {alert_name}"
+            priority = "normal"
+        else:
+            title    = f"Firing: {alert_name}"
+            if total > 1:
+                title += f" (+{total - 1} more)"
+            priority = "critical" if severity == "critical" else "high"
+
+        message = summary or f"{firing}/{total} alerts {status}"
+        return {"title": title, "message": message, "priority": priority}
+
+    # Legacy alerting format
+    state     = data.get("state", "alerting")
+    rule_name = data.get("ruleName") or data.get("title") or "Grafana Alert"
+    msg       = data.get("message", "")
+
+    state_map = {
+        "ok":      (f"Resolved: {rule_name}",  "normal"),
+        "no_data": (f"No Data: {rule_name}",   "low"),
+        "pending": (f"Pending: {rule_name}",   "normal"),
+    }
+    title, priority = state_map.get(state, (f"Alerting: {rule_name}", "high"))
+
+    parts = [msg] if msg else []
+    for m in (data.get("evalMatches") or [])[:5]:
+        metric = m.get("metric", "")
+        value  = m.get("value", "")
+        if metric:
+            parts.append(f"{metric}: {value}")
+    message = "\n".join(parts) or rule_name
+    return {"title": title, "message": message, "priority": priority}
+
+
+def parse_github(data: dict) -> dict:
+    repo = (data.get("repository") or {}).get("full_name", "GitHub")
+
+    # Ping — sent when a webhook is first created
+    if "zen" in data:
+        return {"title": f"[{repo}] GitHub webhook connected",
+                "message": data.get("zen", ""), "priority": "low"}
+
+    # Push
+    if "head_commit" in data or ("commits" in data and "pull_request" not in data):
+        branch  = data.get("ref", "").replace("refs/heads/", "")
+        commits = data.get("commits", [])
+        pusher  = (data.get("pusher") or {}).get("name", "")
+        head    = data.get("head_commit") or (commits[0] if commits else {})
+        count   = len(commits)
+
+        title = f"[{repo}:{branch}] {count} commit{'s' if count != 1 else ''} pushed"
+        lines = []
+        if pusher:
+            lines.append(f"by {pusher}")
+        if head:
+            lines.append(head.get("message", "").split("\n")[0])
+        for c in commits[1:3]:
+            lines.append("• " + c.get("message", "").split("\n")[0])
+        return {"title": title, "message": "\n".join(lines), "priority": "low"}
+
+    # Pull request
+    if "pull_request" in data:
+        pr     = data.get("pull_request", {})
+        action = data.get("action", "")
+        user   = (pr.get("user") or {}).get("login", "")
+        number = pr.get("number", data.get("number", ""))
+        title  = f"[{repo}] PR #{number} {action}: {pr.get('title', '')}"
+        msg    = pr.get("body") or f"by {user}"
+        prio   = "normal" if action in ("opened", "reopened") else "low"
+        return {"title": title[:200], "message": msg[:500], "priority": prio}
+
+    # Issues
+    if "issue" in data:
+        issue  = data.get("issue", {})
+        action = data.get("action", "")
+        user   = (issue.get("user") or {}).get("login", "")
+        number = issue.get("number", "")
+        title  = f"[{repo}] Issue #{number} {action}: {issue.get('title', '')}"
+        msg    = issue.get("body") or f"by {user}"
+        return {"title": title[:200], "message": msg[:500], "priority": "normal"}
+
+    # Release
+    if "release" in data:
+        release = data.get("release", {})
+        action  = data.get("action", "")
+        tag     = release.get("tag_name", "")
+        name    = release.get("name") or tag
+        title   = f"[{repo}] Release {action}: {name}"
+        msg     = release.get("body", "")[:500] or f"Tag: {tag}"
+        prio    = "normal" if action == "published" else "low"
+        return {"title": title, "message": msg, "priority": prio}
+
+    # GitHub Actions workflow run
+    if "workflow_run" in data:
+        run    = data.get("workflow_run", {})
+        name   = run.get("name", "Workflow")
+        status = run.get("conclusion") or run.get("status", "")
+        title  = f"[{repo}] {name}: {status}"
+        msg    = f"Branch: {run.get('head_branch', '')}"
+        prio   = "high" if status == "failure" else "low"
+        return {"title": title, "message": msg, "priority": prio}
+
+    # Fallback
+    sender = (data.get("sender") or {}).get("login", "")
+    return {"title": f"[{repo}] GitHub event",
+            "message": f"Sender: {sender}" if sender else json.dumps(data)[:200],
+            "priority": "low"}
+
+
+def parse_gitea(data: dict) -> dict:
+    # Gitea/Forgejo payloads mirror GitHub's structure
+    return parse_github(data)
+
+
+def parse_sonarr(data: dict) -> dict:
+    event       = data.get("eventType", "")
+    series      = data.get("series", {})
+    series_name = series.get("title", "Unknown Series")
+    episodes    = data.get("episodes", [])
+
+    if event == "Test":
+        return {"title": "Sonarr: Connection test",
+                "message": "Webhook connection successful", "priority": "low"}
+
+    def ep_tag(ep):
+        return f"S{ep.get('seasonNumber', 0):02d}E{ep.get('episodeNumber', 0):02d}"
+
+    if event in ("Download", "EpisodeFileDelete"):
+        verb = "Deleted" if "Delete" in event else "Downloaded"
+        if episodes:
+            e0    = episodes[0]
+            label = f"{ep_tag(e0)} – {e0.get('title', '')}" if e0.get("title") else ep_tag(e0)
+            if len(episodes) > 1:
+                label += f" (+{len(episodes) - 1} more)"
+        else:
+            label = ""
+        q   = _arr_quality((data.get("episodeFile") or {}).get("quality", ""))
+        msg = f"{label} [{q}]".strip() if q else label
+        t   = f"Sonarr {verb}: {series_name}"
+        if episodes:
+            t += f" {ep_tag(episodes[0])}"
+        return {"title": t, "message": msg.strip("[] "), "priority": "low"}
+
+    if event == "Grab":
+        release = data.get("release", {})
+        q       = _arr_quality(release.get("quality", ""))
+        tag     = ep_tag(episodes[0]) if episodes else ""
+        title   = f"Sonarr Grabbed: {series_name} {tag}".strip()
+        msg     = f"[{q}] {release.get('releaseTitle', '')}".strip("[] ") if q else "Grabbed"
+        return {"title": title, "message": msg, "priority": "low"}
+
+    if event == "SeriesDelete":
+        return {"title": f"Sonarr Deleted Series: {series_name}",
+                "message": "Series removed from library", "priority": "normal"}
+
+    if event == "Health":
+        level = data.get("level", "warning")
+        prio  = "critical" if level == "error" else "high"
+        return {"title": f"Sonarr Health {level.title()}: {data.get('type', '')}",
+                "message": data.get("message", "Health check issue"), "priority": prio}
+
+    if event == "ApplicationUpdate":
+        return {"title": f"Sonarr Updated to {data.get('newVersion', 'new version')}",
+                "message": f"Previous: {data.get('previousVersion', '')}", "priority": "low"}
+
+    return {"title": f"Sonarr: {event or 'Event'}",
+            "message": series_name, "priority": "low"}
+
+
+def parse_radarr(data: dict) -> dict:
+    event     = data.get("eventType", "")
+    movie     = data.get("movie", {})
+    year      = movie.get("year", "")
+    name      = movie.get("title", "Unknown Movie")
+    movie_str = f"{name} ({year})" if year else name
+
+    if event == "Test":
+        return {"title": "Radarr: Connection test",
+                "message": "Webhook connection successful", "priority": "low"}
+
+    if event in ("Download", "MovieFileDelete"):
+        verb = "Deleted" if "Delete" in event else "Downloaded"
+        q    = _arr_quality((data.get("movieFile") or {}).get("quality", ""))
+        msg  = f"[{q}]" if q else verb
+        if data.get("isUpgrade"):
+            msg = f"Upgrade {msg}".strip()
+        return {"title": f"Radarr {verb}: {movie_str}",
+                "message": msg.strip("[] "), "priority": "low"}
+
+    if event == "Grab":
+        release = data.get("release", {})
+        q       = _arr_quality(release.get("quality", ""))
+        msg     = f"[{q}] {release.get('releaseTitle', '')}".strip("[] ") if q else "Grabbed"
+        return {"title": f"Radarr Grabbed: {movie_str}", "message": msg, "priority": "low"}
+
+    if event == "MovieDelete":
+        return {"title": f"Radarr Deleted: {movie_str}",
+                "message": "Movie removed from library", "priority": "normal"}
+
+    if event == "Health":
+        level = data.get("level", "warning")
+        prio  = "critical" if level == "error" else "high"
+        return {"title": f"Radarr Health {level.title()}: {data.get('type', '')}",
+                "message": data.get("message", "Health check issue"), "priority": prio}
+
+    if event == "ApplicationUpdate":
+        return {"title": f"Radarr Updated to {data.get('newVersion', 'new version')}",
+                "message": f"Previous: {data.get('previousVersion', '')}", "priority": "low"}
+
+    return {"title": f"Radarr: {event or 'Event'}",
+            "message": movie_str, "priority": "low"}
+
+
+def parse_lidarr(data: dict) -> dict:
+    event       = data.get("eventType", "")
+    artist      = data.get("artist", {})
+    artist_name = artist.get("name", "Unknown Artist")
+    albums      = data.get("albums", [])
+    album_name  = albums[0].get("title", "") if albums else ""
+    subject     = f"{artist_name} — {album_name}" if album_name else artist_name
+
+    if event == "Test":
+        return {"title": "Lidarr: Connection test",
+                "message": "Webhook connection successful", "priority": "low"}
+
+    if event in ("Download", "Grab"):
+        verb    = "Downloaded" if event == "Download" else "Grabbed"
+        release = data.get("release") or ((data.get("trackFiles") or [{}])[0])
+        q       = _arr_quality(release.get("quality", "")) if isinstance(release, dict) else ""
+        msg     = f"[{q}]" if q else verb
+        return {"title": f"Lidarr {verb}: {subject}",
+                "message": msg.strip("[] "), "priority": "low"}
+
+    if event == "Health":
+        level = data.get("level", "warning")
+        prio  = "critical" if level == "error" else "high"
+        return {"title": f"Lidarr Health {level.title()}",
+                "message": data.get("message", "Health check issue"), "priority": prio}
+
+    return {"title": f"Lidarr: {event or 'Event'}",
+            "message": subject, "priority": "low"}
+
+
+def parse_readarr(data: dict) -> dict:
+    event       = data.get("eventType", "")
+    author      = data.get("author", {})
+    author_name = author.get("name", "Unknown Author")
+    books       = data.get("books", [])
+    book_name   = books[0].get("title", "") if books else ""
+    subject     = f"{author_name} — {book_name}" if book_name else author_name
+
+    if event == "Test":
+        return {"title": "Readarr: Connection test",
+                "message": "Webhook connection successful", "priority": "low"}
+
+    if event in ("Download", "Grab"):
+        verb    = "Downloaded" if event == "Download" else "Grabbed"
+        release = data.get("release") or ((data.get("bookFiles") or [{}])[0])
+        q       = _arr_quality(release.get("quality", "")) if isinstance(release, dict) else ""
+        msg     = f"[{q}]" if q else verb
+        return {"title": f"Readarr {verb}: {subject}",
+                "message": msg.strip("[] "), "priority": "low"}
+
+    if event == "Health":
+        level = data.get("level", "warning")
+        prio  = "critical" if level == "error" else "high"
+        return {"title": f"Readarr Health {level.title()}",
+                "message": data.get("message", "Health check issue"), "priority": prio}
+
+    return {"title": f"Readarr: {event or 'Event'}",
+            "message": subject, "priority": "low"}
+
+
+def parse_jellyfin(data: dict) -> dict:
+    notif_type = data.get("NotificationType") or data.get("Type", "")
+    item_name  = data.get("Name") or data.get("ItemName", "")
+    item_type  = data.get("ItemType", "")
+    server     = data.get("ServerName", "Jellyfin")
+    user       = data.get("NotificationUsername") or data.get("UserName", "")
+    series     = data.get("SeriesName", "")
+    season     = data.get("SeasonNumber")
+    episode    = data.get("EpisodeNumber")
+
+    if not notif_type:
+        return parse_generic(data)
+
+    # Build a rich display name for TV episodes
+    if series and season is not None and episode is not None:
+        display = f"{series} S{int(season):02d}E{int(episode):02d}"
+        if item_name:
+            display += f" – {item_name}"
+    else:
+        display = item_name or ""
+
+    label_map = {
+        "PlaybackStart":           ("Now Playing",        "low"),
+        "PlaybackStop":            ("Playback Stopped",   "low"),
+        "PlaybackProgress":        ("Playing",            "low"),
+        "ItemAdded":               ("Library Item Added", "low"),
+        "UserCreatedEvent":        ("New User Created",   "normal"),
+        "UserDeletedEvent":        ("User Deleted",       "normal"),
+        "UserLockedOutEvent":      ("User Locked Out",    "high"),
+        "AuthenticationSucceeded": ("Login",              "low"),
+        "AuthenticationFailed":    ("Login Failed",       "high"),
+        "SessionStarted":          ("Session Started",    "low"),
+        "SubtitleDownloadFailure": ("Subtitle Failed",    "normal"),
+    }
+    label, priority = label_map.get(notif_type,
+                                    (notif_type.replace("Event", "").strip(), "normal"))
+
+    title = f"Jellyfin {label}: {display}" if display else f"Jellyfin: {label}"
+    parts = []
+    if item_type and item_type not in (display, series, item_name):
+        parts.append(f"Type: {item_type}")
+    if user:
+        parts.append(f"User: {user}")
+    if server:
+        parts.append(f"Server: {server}")
+    message = "\n".join(parts) or label
+    return {"title": title, "message": message, "priority": priority}
+
+
+def parse_netdata(data: dict) -> dict:
+    hostname = data.get("hostname") or data.get("host", "unknown")
+    status   = str(data.get("status") or data.get("alarm_status", "UNKNOWN")).upper()
+    alarm    = data.get("alarm_name") or data.get("name", "Alert")
+    chart    = data.get("alarm_chart") or data.get("chart", "")
+    value    = data.get("alarm_value")
+    if value is None:
+        value = data.get("value", "")
+    units    = data.get("alarm_units") or data.get("units", "")
+    info     = data.get("alarm_string") or data.get("info", "")
+
+    icons = {"CRITICAL": "🔴", "WARNING": "🟡", "CLEAR": "✅",
+             "OK": "✅", "REMOVED": "🗑"}
+    icon  = icons.get(status, "❓")
+
+    title = f"{icon} [{hostname}] {alarm}: {status}"
+    parts = []
+    if chart:
+        parts.append(f"Chart: {chart}")
+    if value != "":
+        parts.append(f"Value: {value} {units}".strip())
+    if info:
+        parts.append(info)
+    message = "\n".join(parts) or status
+
+    prio_map = {"CRITICAL": "critical", "WARNING": "high",
+                "CLEAR": "normal", "OK": "low"}
+    priority = prio_map.get(status, "normal")
+    return {"title": title, "message": message, "priority": priority}
+
+
+def parse_proxmox(data: dict) -> dict:
+    """
+    Parser for Proxmox VE 8.1+ webhook notifications.
+    In Proxmox, go to Datacenter → Notifications → Add Webhook endpoint.
+    Set the body template to:
+      {"title":"{{title}}","message":"{{message}}","severity":"{{severity}}","host":"{{host}}"}
+    Severity values Proxmox sends: info, notice, warning, error, unknown
+    """
+    title    = data.get("title", "Proxmox Notification")
+    message  = data.get("message") or data.get("body", "")
+    severity = str(data.get("severity", "info")).lower()
+    host     = data.get("host", "")
+
+    if host and host not in title:
+        title = f"[{host}] {title}"
+
+    prio_map = {
+        "error":   "critical",
+        "warning": "high",
+        "notice":  "normal",
+        "info":    "low",
+        "unknown": "normal",
+    }
+    priority = prio_map.get(severity, "normal")
     return {"title": title, "message": message, "priority": priority}
 
 
@@ -378,7 +811,24 @@ def parse_generic(data: dict) -> dict:
 
 
 PARSERS = {
-    "tautulli": parse_tautulli,
+    # Media
+    "tautulli":    parse_tautulli,
+    "jellyfin":    parse_jellyfin,
+    # Monitoring
+    "uptime-kuma": parse_uptime_kuma,
+    "grafana":     parse_grafana,
+    "netdata":     parse_netdata,
+    # Infrastructure
+    "proxmox":     parse_proxmox,
+    # Code hosting
+    "github":      parse_github,
+    "gitea":       parse_gitea,
+    "forgejo":     parse_gitea,   # same payload structure as Gitea
+    # *arr suite
+    "sonarr":      parse_sonarr,
+    "radarr":      parse_radarr,
+    "lidarr":      parse_lidarr,
+    "readarr":     parse_readarr,
 }
 
 
