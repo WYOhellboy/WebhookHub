@@ -350,6 +350,57 @@ curl -X POST http://your-server:8181/webhook/gameserver \
   }'
 ```
 
+### Uptime Kuma
+
+1. In Uptime Kuma, open the monitor you want notifications for
+2. Scroll to **Notifications** and click **Setup Notification**
+3. Select **Webhook** as the notification type
+4. Set the URL to: `http://your-server:8181/webhook/uptime-kuma`
+5. Set the **Content Type** to `application/json`
+6. Add a custom header: `X-API-Key: your_api_key`
+7. Leave the body as the default (Uptime Kuma sends its own JSON payload)
+8. Click **Test** to verify — a test card will appear in the feed
+
+The parser reads `heartbeat.status` (0 = down → critical, 1 = up → normal) and `monitor.name` to produce the title.
+
+### Proxmox VE
+
+1. In the Proxmox web UI, go to **Datacenter → Notifications**
+2. Under **Endpoints**, click **Add → Webhook**
+3. Fill in:
+   - **Name:** `webhookhub` (or anything you like)
+   - **URL:** `http://your-server:8181/webhook/proxmox`
+   - **Method:** POST
+   - Add header: `Content-Type: application/json`
+   - Add header: `X-API-Key: your_api_key`
+   - **Body:**
+     ```
+     {"title":"{{title}}","message":"{{message}}","severity":"{{severity}}","host":"{{host}}"}
+     ```
+4. Under **Notification Matchers**, create or edit a matcher and add your new endpoint
+5. Click **Test** — a test notification will appear in the feed
+
+Severity levels map to priorities automatically: `error` → critical, `warning` → high, `notice` → normal, `info` → low.
+
+> **Note:** Proxmox VE 8.1 or later is required for webhook notification support.
+
+### Sonarr / Radarr / Lidarr / Readarr
+
+The setup is identical for all *arr apps — substitute the app name in the slug.
+
+1. Go to **Settings → Connect → + Add**
+2. Select **Webhook**
+3. Fill in:
+   - **Name:** `WebhookHub`
+   - **URL:** `http://your-server:8181/webhook/sonarr` *(replace with `radarr`, `lidarr`, or `readarr` as needed)*
+   - **Method:** POST
+   - Add header: `X-API-Key: your_api_key`
+4. Leave **Username** and **Password** blank
+5. Check the events you want (Download, Grab, Health, etc.) and click **Save**
+6. Click **Test** to verify — a low-priority test card appears in the feed
+
+All event types are handled: Download, Grab, File Delete, Series/Movie Delete, Health, Application Update, and Test. Quality strings are normalised whether Sonarr/Radarr returns them as plain strings or nested quality objects.
+
 ### CheckMK (notification script)
 
 Create `/omd/sites/yoursite/local/share/check_mk/notifications/webhookhub`:
